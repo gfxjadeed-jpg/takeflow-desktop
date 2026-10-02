@@ -1,0 +1,93 @@
+{
+  "name": "takeflow-desktop",
+  "productName": "TakeFlow TV",
+  "version": "1.3.2",
+  "description": "TakeFlow TV — تطبيق سطح المكتب (غلافٌ خفيف للموقع: التحديثات تصل من الويب فوراً). TakeFlow Tv - تصميم وتطوير محمد قندقلي",
+  "author": "Mohammed Kundkly",
+  "license": "UNLICENSED",
+  "private": true,
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dist:win": "electron-builder --win nsis --publish never",
+    "dist:mac": "electron-builder --mac dmg --publish never",
+    "dist:linux": "electron-builder --linux AppImage --publish never",
+    "dist:all": "electron-builder --win nsis --mac dmg --linux AppImage --publish never",
+    "release:win": "electron-builder --win nsis --publish always"
+  },
+  "devDependencies": {
+    "electron": "^33.2.0",
+    "electron-builder": "^25.1.8"
+  },
+  "dependencies": {
+    "electron-updater": "^6.3.9"
+  },
+  "build": {
+    "appId": "tv.takeflow.desktop",
+    "productName": "TakeFlow TV",
+    "copyright": "TakeFlow Tv - تصميم وتطوير محمد قندقلي",
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "config.json",
+      "package.json",
+      "build/icon.png"
+    ],
+    "asar": true,
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "GITHUB-USER",
+        "repo": "takeflow-desktop",
+        "releaseType": "release"
+      }
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.png",
+      "artifactName": "TakeFlow-TV-Setup-${version}.${ext}",
+      "extraResources": [
+        {
+          "from": "vendor/ffmpeg-win",
+          "to": "ffmpeg",
+          "filter": [
+            "ffmpeg.exe"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "shortcutName": "TakeFlow TV",
+      "language": "1025"
+    },
+    "mac": {
+      "target": [
+        "dmg"
+      ],
+      "icon": "build/icon.png",
+      "category": "public.app-category.productivity"
+    },
+    "linux": {
+      "target": [
+        "AppImage"
+      ],
+      "icon": "build/icon.png",
+      "category": "Office"
+    }
+  }
+}

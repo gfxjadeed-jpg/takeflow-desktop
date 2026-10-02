@@ -1,0 +1,19 @@
+{
+  "_": "TakeFlow Tv - تصميم وتطوير محمد قندقلي — إعداد تطبيق سطح المكتب. url هو موقع المحطة (وهو ما يحدّد قاعدتها). openPaths يسمح بفتح مسار NEWS من داخل البرنامج. updates (1.3): التحديث التلقائيّ من GitHub Releases (owner/repo مستودعٌ عامّ فيه الإصدارات فقط) أو provider generic مع url لمجلّدٍ يحوي latest.yml والمثبّت. media (1.2): root جذر المسار التلقائيّ (مثل \\\\NEWS\\TakeFlow أو D:\\TakeFlow — فارغ = معطّل) · avidWatch مجلّد المراقبة في Avid (فارغ = معطّل) · ffmpeg مسارٌ بديل للمرفق (فارغ = المرفق) · proxyHeight ارتفاع نسخة المعاينة.",
+  "url": "https://takeflowtv.vercel.app",
+  "openPaths": true,
+  "zoom": 1.0,
+  "updates": {
+    "enabled": true,
+    "provider": "github",
+    "owner": "",
+    "repo": "takeflow-desktop",
+    "url": ""
+  },
+  "media": {
+    "root": "",
+    "avidWatch": "",
+    "ffmpeg": "",
+    "proxyHeight": 540
+  }
+}
