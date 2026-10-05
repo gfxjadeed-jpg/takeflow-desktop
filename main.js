@@ -25,6 +25,14 @@
        لا يقرؤه Chromium يُحوَّل إلى نسخةٍ خفيفة (proxy) بـffmpeg المرفق وتُحفظ فلا تُعاد
      • إلى Avid: نسخٌ إلى مجلّد المراقبة (media.avidWatch) باسمٍ مؤقّت ثمّ إعادة تسمية بعد مطابقة
        الحجم — فلا يلتقط Avid نصف ملفّ
+   الغلاف 1.4 (v622) — شريط عنوانٍ من البرنامج نفسه:
+     • النافذة بلا إطار النظام (titleBarStyle: hidden) وأزرار التصغير والتكبير والإغلاق من ويندوز نفسه فوقها
+       (Windows Controls Overlay) — والشريط تحتها ترسمه الصفحة: القوائم (ملف · تحرير · عرض · انتقال · مساعدة)
+       من سجلّ أوامر ☰ نفسه، بالعربيّة من اليمين وبالإنكليزيّة من اليسار، وبألوان الهويّة
+     • الصفحة تبلّغ ألوان شريطها (tf-titlebar) فيتلوّن معها شريط الأزرار · وأوامر النافذة (tf-win-cmd) من قائمةٍ مسموحة
+     • صفحةٌ أقدم لا ترسم الشريط ← بعد عشر ثوانٍ يُحقن شريط سحبٍ بسيط فلا تبقى النافذة بلا مقبض
+     • config.json → titleBar: "system" يعيد إطار النظام كما كان (لمن يفضّله أو لجهازٍ لا يعرضه)
+     • الأيقونة الجديدة (build/icon.ico بسبعة مقاسات لويندوز)
    الأمان: contextIsolation، لا nodeIntegration، الروابط الخارجيّة في المتصفّح،
    وفتح المسارات مقيّدٌ بشكل مسارٍ محلّيّ/شبكيّ لا رابط. وكلّ قنوات 1.2 من صفحة المحطة وحدها،
    والمعاينة برمزٍ عشوائيّ يصدره الغلاف لملفٍّ بعينه — لا مسار في الرابط.
@@ -57,6 +65,12 @@ const POPUP_OK = [APP_ORIGIN, 'https://accounts.google.com', 'https://login.micr
 let win = null, tray = null, quitting = false, lastBadge = 0;
 const START_HIDDEN = process.argv.includes('--hidden');
 const ICON = path.join(__dirname, 'build', 'icon.png');
+/* 1.4 — ويندوز يأخذ ICO بمقاساته (١٦…٢٥٦) فلا تُصغَّر صورةٌ كبيرة في شريط المهامّ وبجانب الساعة */
+const ICON_WIN = path.join(__dirname, 'build', process.platform === 'win32' && fs.existsSync(path.join(__dirname, 'build', 'icon.ico')) ? 'icon.ico' : 'icon.png');
+/* 1.4 — شريط العنوان من الصفحة (الافتراضيّ) أو إطار النظام (titleBar: "system") */
+const CHROME = CFG.titleBar !== 'system';
+const CHROME_H = 36;
+let titlebarSeen = false, titlebarTimer = null;
 /* شارة غير المقروء على ويندوز (أيقونةٌ فوق أيقونة البرنامج في شريط المهامّ) — نقطةٌ حمراء 32×32 */
 const DOT_PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAzUlEQVR4nO2XQQ6DMAwECc/oj3rhsVz4Ub+R3iLXsWNv7aKIstcku6ONALMs/66CHqi11qFhKZCne7MV/C2IuQkNRkGGi1r467mJ+x/HDkOoCzxcC9XEYTSI9Rfh0hmtzQ4gIxyBEBvICPd6fABQwoxwyYu3MGzgDDWA6POOiGaJDWTWb3nOcwU3wA1ApX3VItI8GwA6yUREs+a6AkqWeQ3Uizc9bCADwvLoADhhBMIzFYkNZEB4R7J5h1ILwqvQWB4BSfsxQUHOfKFdQ29G8Wsw7O8PeQAAAABJRU5ErkJggg==';
 
@@ -78,11 +92,23 @@ function showWin() {
 
 function createWindow() {
   const st = loadState();
-  win = new BrowserWindow({
+  /* 1.4 — بلا إطار النظام: أزرار النافذة من ويندوز فوق شريطٍ ترسمه الصفحة (ماك: الأزرار الثلاثة في مكانها) */
+  const frame = !CHROME ? {} : process.platform === 'darwin'
+    ? { titleBarStyle: 'hiddenInset' }
+    : { titleBarStyle: 'hidden', titleBarOverlay: { color: '#0a0e1a', symbolColor: '#e8eef8', height: CHROME_H } };
+  win = new BrowserWindow(Object.assign({
     width: st.width, height: st.height, x: st.x, y: st.y, minWidth: 1024, minHeight: 680,
     title: 'TakeFlow TV', backgroundColor: '#0a0e1a', autoHideMenuBar: true, show: false,
-    icon: path.join(__dirname, 'build', 'icon.png'),
-    webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false, sandbox: false, spellcheck: true },
+    icon: ICON_WIN,
+    webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false, sandbox: false, spellcheck: true,
+      additionalArguments: ['--tf-chrome=' + (CHROME ? (process.platform === 'darwin' ? 'mac' : 'wco') : 'off')] },
+  }, frame));
+  /* 1.4 — الصفحة تبلّغ شريطها بعد كلّ تحميل؛ صفحةٌ أقدم لا تفعل ← شريط سحبٍ بسيط بعد عشر ثوانٍ */
+  win.webContents.on('did-start-loading', () => { titlebarSeen = false; });
+  win.webContents.on('did-finish-load', () => {
+    if (!CHROME) return;
+    clearTimeout(titlebarTimer);
+    titlebarTimer = setTimeout(() => { if (!titlebarSeen && win && !win.isDestroyed()) titlebarFallback(); }, 10000);
   });
   win.once('ready-to-show', () => {
     if (st.maximized) win.maximize();
@@ -169,7 +195,7 @@ async function pickFolder(key) {
    فكانت الصورة فارغة في النسخة المثبّتة (تعمل من المصدر فقط). أُضيفت للحزمة، وإن غابت
    لأيّ سبب نأخذ أيقونة البرنامج نفسه بدل مربّعٍ فارغ. */
 function trayImage() {
-  const img = nativeImage.createFromPath(ICON);
+  const img = nativeImage.createFromPath(ICON_WIN);   /* 1.4 — ICO على ويندوز: مقاس ١٦ مرسومٌ لا مصغَّر */
   return img.isEmpty() ? img : img.resize({ width: 16, height: 16 });
 }
 function createTray() {
@@ -458,6 +484,44 @@ ipcMain.handle('tf-desktop-info', () => ({ version: app.getVersion(), platform: 
 const fromApp = (ev) => !!(ev.senderFrame && String(ev.senderFrame.url || '').startsWith(APP_ORIGIN));
 ipcMain.on('tf-badge', (ev, n) => { if (fromApp(ev)) setBadge(n); });
 ipcMain.on('tf-focus', (ev) => { if (fromApp(ev)) showWin(); });
+
+/* ═══ الغلاف 1.4 (v622) — شريط العنوان من الصفحة ═══
+   tf-titlebar: الصفحة ترسم شريطها وتبلّغ لونيه فيتلوّن شريط أزرار ويندوز معه (لونان بصيغة #rrggbb وحدها، والارتفاع ٢٨–٤٨).
+   tf-win-cmd: أوامر القوائم التي لا تملكها الصفحة — من قائمةٍ مسموحة بأسمائها، ومن صفحة المحطة وحدها. */
+const HEX = /^#[0-9a-fA-F]{6}$/;
+ipcMain.on('tf-titlebar', (ev, o) => {
+  if (!fromApp(ev) || !CHROME || !win || win.isDestroyed()) return;
+  titlebarSeen = true; clearTimeout(titlebarTimer);
+  if (process.platform === 'darwin' || typeof win.setTitleBarOverlay !== 'function') return;
+  const color = HEX.test(String(o && o.color)) ? String(o.color) : '#0a0e1a';
+  const symbolColor = HEX.test(String(o && o.symbolColor)) ? String(o.symbolColor) : '#e8eef8';
+  const height = Math.max(28, Math.min(48, Math.round(Number(o && o.height) || CHROME_H)));
+  try { win.setTitleBarOverlay({ color, symbolColor, height }); } catch (e) { console.error('titlebar', e.message); }
+});
+const WIN_CMD = {
+  reload: () => win.webContents.reload(),
+  devtools: () => win.webContents.toggleDevTools(),
+  fullscreen: () => win.setFullScreen(!win.isFullScreen()),
+  quit: () => { quitting = true; app.quit(); },
+  undo: () => win.webContents.undo(), redo: () => win.webContents.redo(),
+  cut: () => win.webContents.cut(), copy: () => win.webContents.copy(), paste: () => win.webContents.paste(),
+  selectAll: () => win.webContents.selectAll(),
+  pickRoot: () => pickFolder('root'), pickAvid: () => pickFolder('avidWatch'),
+  downloads: () => shell.openPath(app.getPath('downloads')),
+};
+ipcMain.on('tf-win-cmd', (ev, name) => {
+  if (!fromApp(ev) || !win || win.isDestroyed()) return;
+  const f = Object.prototype.hasOwnProperty.call(WIN_CMD, String(name)) ? WIN_CMD[String(name)] : null;
+  if (f) { try { f(); } catch (e) { console.error('win-cmd', name, e.message); } }
+});
+/* صفحةٌ لا ترسم الشريط (أقدم من v622): شريط سحبٍ رفيع تحت أزرار النافذة ويُزاح المحتوى تحته — النافذة تبقى قابلةً للسحب */
+function titlebarFallback() {
+  try {
+    win.webContents.insertCSS(`html{--tf-fb-h:${CHROME_H}px}body{margin-top:var(--tf-fb-h)!important}
+      body::before{content:'TakeFlow TV';position:fixed;top:0;left:0;right:0;height:var(--tf-fb-h);z-index:2147483647;display:flex;align-items:center;
+      padding:0 12px;font:600 12px system-ui;color:#e8eef8;background:#0a0e1a;-webkit-app-region:drag;app-region:drag}`);
+  } catch (e) { console.error('titlebar fallback', e.message); }
+}
 
 /* ═══════════════════════════════════════════════════════════════════
    الغلاف 1.2 (v578) — المسار التلقائيّ · التحقّق · المراقبة · المعاينة · Avid

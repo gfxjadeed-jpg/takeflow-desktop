@@ -1,7 +1,7 @@
 {
   "name": "takeflow-desktop",
   "productName": "TakeFlow TV",
-  "version": "1.3.3",
+  "version": "1.4.0",
   "description": "TakeFlow TV — تطبيق سطح المكتب (غلافٌ خفيف للموقع: التحديثات تصل من الويب فوراً). TakeFlow Tv - تصميم وتطوير محمد قندقلي",
   "author": "Mohammed Kundkly",
   "license": "UNLICENSED",
@@ -35,7 +35,8 @@
       "preload.js",
       "config.json",
       "package.json",
-      "build/icon.png"
+      "build/icon.png",
+      "build/icon.ico"
     ],
     "asar": true,
     "publish": [
@@ -55,7 +56,7 @@
           ]
         }
       ],
-      "icon": "build/icon.png",
+      "icon": "build/icon.ico",
       "artifactName": "TakeFlow-TV-Setup-${version}.${ext}",
       "extraResources": [
         {
