@@ -55,6 +55,20 @@ function loadConfig() {
 }
 const CFG = loadConfig();
 const APP_ORIGIN = new URL(CFG.url).origin;
+/* 1.4.1 — أصول البرنامج: أصل config.json · وtakeflowtv.vercel.app · ونطاقات المحطّات <المحطّة>.takeflowtv.com
+   (لا الجذر ولا www — موقع المنتج يُفتح في المتصفّح). كانت الفحوص «يبدأ بـAPP_ORIGIN» نصّاً: فيمرّ
+   https://takeflowtv.vercel.app.example.com — صار الأصل يُقارن كاملاً. وانتقال المحطّة إلى نطاقها الخاصّ
+   (الإعدادات ← عنوان البرنامج) يبقى داخل التطبيق ويُحفظ للتشغيل التالي. */
+function isAppOrigin(o) {
+  try {
+    const u = new URL(String(o || ''));
+    if (u.origin === APP_ORIGIN) return true;
+    if (u.protocol !== 'https:' || u.port) return false;
+    const h = u.hostname.toLowerCase();
+    return h === 'takeflowtv.vercel.app' || (/^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.takeflowtv\.com$/.test(h) && !/^www\./.test(h));
+  } catch (e) { return false; }
+}
+const isAppUrl = (u) => isAppOrigin(u);
 /* 1.2 — المسارات: root للمسار التلقائيّ · avidWatch مجلّد مراقبة Avid · ffmpeg مسارٌ بديل للمرفق */
 const MEDIA = Object.assign({ root: '', avidWatch: '', ffmpeg: '', proxyHeight: 540 }, (CFG.media && typeof CFG.media === 'object') ? CFG.media : {});
 /* tfmedia:// قبل الجاهزيّة: مخطّطٌ آمن يبثّ (stream) ويُقرأ بـfetch — شرطٌ لـ<video> بالمدى */
@@ -131,14 +145,16 @@ function createWindow() {
   win.webContents.setWindowOpenHandler(({ url }) => {
     try {
       const o = new URL(url).origin;
-      if (POPUP_OK.includes(o)) return { action: 'allow', overrideBrowserWindowOptions: { width: 560, height: 720, autoHideMenuBar: true, webPreferences: { contextIsolation: true, nodeIntegration: false } } };
+      if (POPUP_OK.includes(o) || isAppOrigin(o)) return { action: 'allow', overrideBrowserWindowOptions: { width: 560, height: 720, autoHideMenuBar: true, webPreferences: { contextIsolation: true, nodeIntegration: false } } };
     } catch (e) {}
     shell.openExternal(url);
     return { action: 'deny' };
   });
   win.webContents.on('will-navigate', (ev, url) => {
-    try { if (new URL(url).origin !== APP_ORIGIN) { ev.preventDefault(); shell.openExternal(url); } } catch (e) { ev.preventDefault(); }
+    try { if (!isAppUrl(url)) { ev.preventDefault(); shell.openExternal(url); } } catch (e) { ev.preventDefault(); }
   });
+  /* 1.4.1 — انتقلت المحطّة إلى نطاقها الخاصّ: يُحفظ العنوان الجديد فيفتح التطبيق عليه في المرّة التالية */
+  win.webContents.on('did-navigate', (ev, url) => { try { rememberAppUrl(url); } catch (e) {} });
   win.on('closed', () => { win = null; });
   win.loadURL(CFG.url);
   /* لا شبكة عند التشغيل: صفحةٌ تقول ذلك وتعيد المحاولة */
@@ -190,6 +206,23 @@ async function pickFolder(key) {
     try { new Notification({ title: 'TakeFlow TV', body: (key === 'root' ? 'جذر المسارات: ' : 'مجلّد Avid: ') + v, icon: ICON }).show(); } catch (e) {}
     return true;
   } catch (e) { console.error('pickFolder', e.message); return false; }
+}
+/* 1.4.1 — العنوان الذي انتقلت إليه المحطّة (نطاقٌ من isAppOrigin غير الحاليّ) يُحفظ في إعداد المستخدم */
+function rememberAppUrl(url) {
+  if (!isAppUrl(url)) return false;
+  const o = new URL(url).origin;
+  if (o === new URL(CFG.url).origin) return false;
+  if (!/\.takeflowtv\.com$/.test(new URL(o).hostname)) return false;   /* إلى النطاق الخاصّ وحده — لا رجوع إلى القديم */
+  const f = path.join(app.getPath('userData'), 'config.json');
+  let cur = null;
+  /* إعداد المستخدم إن وُجد، وإلّا إعداد المثبّت — كي لا يضيع ما فيه حين يُكتب إعداد المستخدم أوّل مرّة */
+  for (const p of [f, path.join(__dirname, 'config.json')]) { if (cur) break; try { if (fs.existsSync(p)) cur = JSON.parse(fs.readFileSync(p, 'utf8')); } catch (e) { cur = null; } }
+  cur = (cur && typeof cur === 'object') ? cur : {};
+  if (cur.url === o + '/') return false;
+  cur.url = o + '/';
+  CFG.url = cur.url;
+  fs.writeFileSync(f, JSON.stringify(cur, null, 2));
+  return true;
 }
 /* 1.1.1 — «أيقونة شريط المهام فارغة»: build/icon.png لم يكن ضمن ملفّات الحزمة (files)،
    فكانت الصورة فارغة في النسخة المثبّتة (تعمل من المصدر فقط). أُضيفت للحزمة، وإن غابت
@@ -253,9 +286,12 @@ else {
   app.on('before-quit', () => { quitting = true; saveState(); });
   if (process.platform === 'win32') app.setAppUserModelId('tv.takeflow.desktop');   /* إشعارات ويندوز باسم البرنامج */
   app.whenReady().then(() => {
-    /* الإشعارات والحافظة مسموحة لموقع المحطة وحده — الباقي يُرفض */
+    /* الإشعارات والحافظة مسموحة لموقع المحطة وحده — الباقي يُرفض.
+       1.4.1 — والكتابة في مجلّدٍ يختاره المستخدم (fileSystem — File System Access في Electron 30+): كان يُرفض بصمت،
+       فـ«اختر مجلّداً» في الاستوديو لا يختار شيئاً وتنزل الصور مضغوطةً إلى التنزيلات. المستخدم يختار المجلّد بنفسه
+       من نافذة النظام — والإذن لموقع المحطة وحده كالباقي. */
     session.defaultSession.setPermissionRequestHandler((wc, permission, cb, details) => {
-      const ok = ['notifications', 'clipboard-read', 'clipboard-sanitized-write', 'fullscreen', 'media'].includes(permission) && String(details && details.requestingUrl || '').startsWith(APP_ORIGIN);
+      const ok = ['notifications', 'clipboard-read', 'clipboard-sanitized-write', 'fullscreen', 'media', 'fileSystem'].includes(permission) && isAppUrl(details && details.requestingUrl);
       cb(ok);
     });
     Menu.setApplicationMenu(Menu.buildFromTemplate([
@@ -473,7 +509,7 @@ app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(
 const PATH_OK = /^(?:[a-zA-Z]:[\\/]|\\\\[^\\/]+\\|\/)[^\r\n"<>|*?]{1,600}$/;
 ipcMain.handle('tf-open-path', async (ev, p) => {
   if (!CFG.openPaths) return { ok: false, error: 'disabled' };
-  if (!ev.senderFrame || !String(ev.senderFrame.url || '').startsWith(APP_ORIGIN)) return { ok: false, error: 'origin' };
+  if (!ev.senderFrame || !isAppUrl(ev.senderFrame.url)) return { ok: false, error: 'origin' };
   const v = String(p || '').trim();
   if (!PATH_OK.test(v)) return { ok: false, error: 'bad_path' };
   const err = await shell.openPath(v);
@@ -481,7 +517,7 @@ ipcMain.handle('tf-open-path', async (ev, p) => {
 });
 ipcMain.handle('tf-desktop-info', () => ({ version: app.getVersion(), platform: process.platform, url: CFG.url, host: seg(require('os').hostname() || '', 60) }));   /* 1.3.1 — اسم الجهاز: الوكيل يُعرَف به في الغرفة */
 /* الغلاف 1.1 — من صفحة المحطة وحدها */
-const fromApp = (ev) => !!(ev.senderFrame && String(ev.senderFrame.url || '').startsWith(APP_ORIGIN));
+const fromApp = (ev) => !!(ev.senderFrame && isAppUrl(ev.senderFrame.url));   /* 1.4.1 — الأصل كاملاً لا بادئته */
 ipcMain.on('tf-badge', (ev, n) => { if (fromApp(ev)) setBadge(n); });
 ipcMain.on('tf-focus', (ev) => { if (fromApp(ev)) showWin(); });
 
@@ -868,7 +904,7 @@ async function serveMedia(req) {
       else { start = Math.max(0, size - Number(m[2])); }
     }
     if (start > end || start >= size) return new Response('', { status: 416, headers: { 'Content-Range': 'bytes */' + size } });
-    const h = { 'Content-Type': e.mime, 'Content-Length': String(end - start + 1), 'Accept-Ranges': 'bytes', 'Cache-Control': 'no-store', 'Access-Control-Allow-Origin': APP_ORIGIN };
+    const h = { 'Content-Type': e.mime, 'Content-Length': String(end - start + 1), 'Accept-Ranges': 'bytes', 'Cache-Control': 'no-store', 'Access-Control-Allow-Origin': (isAppOrigin(req.headers.get('origin')) ? new URL(req.headers.get('origin')).origin : APP_ORIGIN), 'Vary': 'Origin' };
     if (status === 206) h['Content-Range'] = 'bytes ' + start + '-' + end + '/' + size;
     return new Response(Readable.toWeb(fs.createReadStream(e.file, { start, end })), { status, headers: h });
   } catch (err) { return new Response('', { status: 404 }); }
