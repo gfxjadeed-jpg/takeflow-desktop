@@ -7,7 +7,7 @@
   "updates": {
     "enabled": true,
     "provider": "github",
-    "owner": "",
+    "owner": "gfxjadeed-jpg",
     "repo": "takeflow-desktop",
     "url": ""
   },

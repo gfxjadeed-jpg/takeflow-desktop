@@ -33,6 +33,17 @@
      • صفحةٌ أقدم لا ترسم الشريط ← بعد عشر ثوانٍ يُحقن شريط سحبٍ بسيط فلا تبقى النافذة بلا مقبض
      • config.json → titleBar: "system" يعيد إطار النظام كما كان (لمن يفضّله أو لجهازٍ لا يعرضه)
      • الأيقونة الجديدة (build/icon.ico بسبعة مقاسات لويندوز)
+   الغلاف 1.4.2 (v652) — الأمان:
+     • ما يُفتح خارج التطبيق روابط الويب والبريد وحدها (http · https · mailto) — لا file: ولا مخطّطات تشغّل برامج
+     • فتح مسار الطلب: المجلّد يُفتح، وملفّ الوسائط والمستندات يُفتح، وما سواها (exe · bat · lnk · ps1 · msi …)
+       يُعرض في مجلّده ولا يُشغَّل أبداً
+     • أدوات المطوّر مقفلة في النسخة المثبّتة (تُفتح بـ devTools: true في config.json على الجهاز وحده)
+     • النوافذ في صندوقٍ معزول (sandbox) · مصدر التحديث من قائمةٍ ثابتة في التطبيق: مستودع takeflow-desktop على GitHub
+       أو تخزين مشروع المحطة المعروف — والصفحة تختار منها ولا تضيف إليها
+   الغلاف 1.6.0 (v661) — جهاز المحطّة:
+     • الذكاء المحلّيّ: Ollama على الجهاز نفسه (127.0.0.1) — الحالة والنماذج والتنزيل والتوليد (tf-llm)
+     • التفريغ: whisper.cpp يختاره صاحب الجهاز (برنامجٌ ونموذج) ويُشغَّل بوسائط ثابتة (tf-asr · tf-asr-pick)
+     • الذاكرة والمساحة (tf-sys) — والطابور نفسه في القاعدة: الجهاز يسأل ولا يُفتح فيه منفذ
    الأمان: contextIsolation، لا nodeIntegration، الروابط الخارجيّة في المتصفّح،
    وفتح المسارات مقيّدٌ بشكل مسارٍ محلّيّ/شبكيّ لا رابط. وكلّ قنوات 1.2 من صفحة المحطة وحدها،
    والمعاينة برمزٍ عشوائيّ يصدره الغلاف لملفٍّ بعينه — لا مسار في الرابط.
@@ -69,6 +80,17 @@ function isAppOrigin(o) {
   } catch (e) { return false; }
 }
 const isAppUrl = (u) => isAppOrigin(u);
+/* 1.4.2 — خارج التطبيق: http · https · mailto وحدها. كان أيّ رابطٍ تطلبه الصفحة يُسلَّم للنظام كما هو —
+   file:///…exe أو ms-msdt: أو search-ms: تُشغّل برامج أو تفتح ما لا يُرى. */
+function openExt(url) {
+  try {
+    const u = new URL(String(url || ''));
+    if (!/^(https?:|mailto:)$/i.test(u.protocol) || u.username || u.password) return false;
+    shell.openExternal(u.href); return true;
+  } catch (e) { return false; }
+}
+/* 1.4.2 — أدوات المطوّر: من المصدر (غير مثبّت) أو حين يكتب صاحب الجهاز devTools: true في config.json — لا من الصفحة */
+const DEVTOOLS = !app.isPackaged || CFG.devTools === true;
 /* 1.2 — المسارات: root للمسار التلقائيّ · avidWatch مجلّد مراقبة Avid · ffmpeg مسارٌ بديل للمرفق */
 const MEDIA = Object.assign({ root: '', avidWatch: '', ffmpeg: '', proxyHeight: 540 }, (CFG.media && typeof CFG.media === 'object') ? CFG.media : {});
 /* tfmedia:// قبل الجاهزيّة: مخطّطٌ آمن يبثّ (stream) ويُقرأ بـfetch — شرطٌ لـ<video> بالمدى */
@@ -114,7 +136,7 @@ function createWindow() {
     width: st.width, height: st.height, x: st.x, y: st.y, minWidth: 1024, minHeight: 680,
     title: 'TakeFlow TV', backgroundColor: '#0a0e1a', autoHideMenuBar: true, show: false,
     icon: ICON_WIN,
-    webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false, sandbox: false, spellcheck: true,
+    webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false, sandbox: true, devTools: DEVTOOLS, spellcheck: true,
       additionalArguments: ['--tf-chrome=' + (CHROME ? (process.platform === 'darwin' ? 'mac' : 'wco') : 'off')] },
   }, frame));
   /* 1.4 — الصفحة تبلّغ شريطها بعد كلّ تحميل؛ صفحةٌ أقدم لا تفعل ← شريط سحبٍ بسيط بعد عشر ثوانٍ */
@@ -145,13 +167,13 @@ function createWindow() {
   win.webContents.setWindowOpenHandler(({ url }) => {
     try {
       const o = new URL(url).origin;
-      if (POPUP_OK.includes(o) || isAppOrigin(o)) return { action: 'allow', overrideBrowserWindowOptions: { width: 560, height: 720, autoHideMenuBar: true, webPreferences: { contextIsolation: true, nodeIntegration: false } } };
+      if (POPUP_OK.includes(o) || isAppOrigin(o)) return { action: 'allow', overrideBrowserWindowOptions: { width: 560, height: 720, autoHideMenuBar: true, webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true, devTools: DEVTOOLS } } };
     } catch (e) {}
-    shell.openExternal(url);
+    openExt(url);
     return { action: 'deny' };
   });
   win.webContents.on('will-navigate', (ev, url) => {
-    try { if (!isAppUrl(url)) { ev.preventDefault(); shell.openExternal(url); } } catch (e) { ev.preventDefault(); }
+    try { if (!isAppUrl(url)) { ev.preventDefault(); openExt(url); } } catch (e) { ev.preventDefault(); }
   });
   /* 1.4.1 — انتقلت المحطّة إلى نطاقها الخاصّ: يُحفظ العنوان الجديد فيفتح التطبيق عليه في المرّة التالية */
   win.webContents.on('did-navigate', (ev, url) => { try { rememberAppUrl(url); } catch (e) {} });
@@ -302,7 +324,7 @@ else {
         { label: 'الحجم الأصليّ', accelerator: 'CmdOrCtrl+0', click: () => win && win.webContents.setZoomFactor(1) },
         { label: 'ملء الشاشة', accelerator: 'F11', click: () => win && win.setFullScreen(!win.isFullScreen()) },
         { type: 'separator' },
-        { label: 'أدوات المطوّر', accelerator: 'F12', click: () => win && win.webContents.toggleDevTools() },
+        ...(DEVTOOLS ? [{ label: 'أدوات المطوّر', accelerator: 'F12', click: () => win && win.webContents.toggleDevTools() }] : []),
         { label: 'خروج', accelerator: 'CmdOrCtrl+Q', click: () => { quitting = true; app.quit(); } },
       ] },
       { label: 'المسارات', submenu: pathsMenu() },   /* 1.2 */
@@ -338,14 +360,26 @@ else {
 let UPD = { state: 'idle', version: '', percent: 0, error: '', at: 0, configured: false, updater: null, feed: '', wired: false, ready: Promise.resolve(), via: '' };
 function updSend() { try { if (win && !win.isDestroyed()) win.webContents.send('tf-update-state', updState()); } catch (e) {} }
 function updState() { return { state: UPD.state, version: UPD.version, percent: UPD.percent, error: UPD.error, at: UPD.at, configured: UPD.configured, current: app.getVersion(), feed: UPD.feed }; }
+/* 1.4.2 — المصدر من قائمةٍ ثابتة في التطبيق لا من الصفحة: كان يُقبل أيّ مستودعٍ على GitHub وأيّ مشروعٍ على Supabase —
+   فمن يصل إلى إعدادات المحطّة (أو إلى صفحتها بثغرة) يدفع مثبّتاً من حسابه إلى كلّ أجهزة الغرفة، وelectron-updater
+   يتحقّق من بصمة latest.yml القادم من المصدر نفسه. الآن: مستودع TakeFlow وحده، وتخزين مشروع المحطة المعروف وحده
+   (مجلّد desktop-releases) — ومن يريد غيرهما يكتبه صاحب الجهاز في config.json (updates.allowRepos · updates.allowHosts). */
+const UPD_REPOS = ['gfxjadeed-jpg/takeflow-desktop'];
+const UPD_SB = ['iktjfdwqatlamqmqvefq.supabase.co'];
 function feedOk(u) {
   let x; try { x = new URL(String(u || '')); } catch (e) { return false; }
-  if (x.protocol !== 'https:' || x.username || x.password) return false;
-  const extra = (CFG.updates && Array.isArray(CFG.updates.allowHosts) ? CFG.updates.allowHosts : []).map(String).filter((h) => /^[a-z0-9.*-]+$/i.test(h));
+  if (x.protocol !== 'https:' || x.username || x.password || x.port) return false;
+  const U = (CFG.updates && typeof CFG.updates === 'object') ? CFG.updates : {};
+  const extra = (Array.isArray(U.allowHosts) ? U.allowHosts : []).map(String).filter((h) => /^[a-z0-9.*-]+$/i.test(h));
+  const repos = UPD_REPOS.concat((Array.isArray(U.allowRepos) ? U.allowRepos : []).map(String)).map((r) => r.toLowerCase());
   const hostRe = (h) => new RegExp('^' + h.replace(/\./g, '\\.').replace(/\*/g, '[a-z0-9-]+') + '$', 'i');
-  const host = x.hostname;
-  if (/\.supabase\.co$/i.test(host)) return /^\/storage\/v1\/object\/public\/[^/]+\//.test(x.pathname);
-  if (/^github\.com$/i.test(host)) return !!ghRepo(u) || /^\/[^/]+\/[^/]+\/releases\//.test(x.pathname);
+  const host = x.hostname.toLowerCase();
+  if (/\.supabase\.co$/i.test(host)) return (UPD_SB.includes(host) || extra.some((h) => hostRe(h).test(host))) && /^\/storage\/v1\/object\/public\/desktop-releases\//.test(x.pathname);
+  if (/^github\.com$/i.test(host)) {
+    const m = x.pathname.match(/^\/([^/]+)\/([^/]+)(?:\/|$)/);
+    if (!m || !repos.includes((m[1] + '/' + m[2].replace(/\.git$/i, '')).toLowerCase())) return false;
+    return !!ghRepo(u) || /^\/[^/]+\/[^/]+\/releases\//.test(x.pathname);
+  }
   return extra.some((h) => hostRe(h).test(host));
 }
 /* 1.3.2 — رابط مستودع GitHub كما يُنسخ من المتصفّح (https://github.com/owner/repo · …/releases · …/releases/latest · …/releases/tag/v1)
@@ -384,7 +418,7 @@ function updaterInit() {
   if (u.feed && feedOk(u.feed) && (gh = ghRepo(u.feed))) feed = { provider: 'github', owner: gh.owner, repo: gh.repo, src: String(u.feed) };   /* 1.3.2 */
   else if (u.feed && feedOk(u.feed)) feed = { provider: 'generic', url: String(u.feed) };
   else if (u.provider === 'generic' && feedOk(u.url)) feed = { provider: 'generic', url: String(u.url) };
-  else if (u.provider !== 'generic' && u.owner && u.repo) feed = { provider: 'github', owner: String(u.owner), repo: String(u.repo) };
+  else if (u.provider !== 'generic' && u.owner && u.repo && feedOk('https://github.com/' + u.owner + '/' + u.repo)) feed = { provider: 'github', owner: String(u.owner), repo: String(u.repo) };
   if (!feed) { UPD.configured = false; return; }
   if (!updWire()) { UPD.configured = false; return; }
   try {
@@ -507,15 +541,27 @@ app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(
 
 /* فتح مسار NEWS: مسارٌ محلّيّ (C:\…) أو شبكيّ (\\NEWS\…) أو /… — لا روابط ولا أوامر */
 const PATH_OK = /^(?:[a-zA-Z]:[\\/]|\\\\[^\\/]+\\|\/)[^\r\n"<>|*?]{1,600}$/;
+/* 1.4.2 — المسار يُفتح ولا يُشغَّل: shell.openPath يشغّل الملفّ بتطبيقه — ومسارٌ في طلبٍ يشير إلى
+   \\srv\share\x.exe كان يُشغّل برنامجاً على جهاز من يضغطه. الآن: المجلّد يُفتح · ملفّ الوسائط والصور والمستندات
+   يُفتح بتطبيقه · وأيّ ملفٍّ آخر يُعرض في مجلّده محدَّداً (showItemInFolder) ولا يُشغَّل. */
+const OPEN_EXT = new Set(['mp4', 'm4v', 'mov', 'mxf', 'mpg', 'mpeg', 'mts', 'm2ts', 'ts', 'avi', 'mkv', 'wmv', 'webm', 'dv', 'vob', 'flv',
+  'mp3', 'm4a', 'aac', 'wav', 'ogg', 'flac', 'aif', 'aiff', 'png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'tif', 'tiff', 'psd', 'ai', 'eps', 'svg',
+  'pdf', 'txt', 'srt', 'vtt', 'xml', 'csv', 'docx', 'xlsx', 'pptx', 'odt', 'ods', 'rtf', 'aep', 'prproj', 'avp', 'avb', 'zip']);
 ipcMain.handle('tf-open-path', async (ev, p) => {
   if (!CFG.openPaths) return { ok: false, error: 'disabled' };
   if (!ev.senderFrame || !isAppUrl(ev.senderFrame.url)) return { ok: false, error: 'origin' };
   const v = String(p || '').trim();
   if (!PATH_OK.test(v)) return { ok: false, error: 'bad_path' };
+  let st = null;
+  try { st = await within(fs.promises.stat(v), 6000); } catch (e) { return { ok: false, error: errOf(e) }; }
+  if (!st.isDirectory() && !(st.isFile() && OPEN_EXT.has(extOf(v)))) {
+    try { shell.showItemInFolder(v); } catch (e) { return { ok: false, error: 'unreachable' }; }
+    return { ok: true, revealed: true };
+  }
   const err = await shell.openPath(v);
   return err ? { ok: false, error: err } : { ok: true };
 });
-ipcMain.handle('tf-desktop-info', () => ({ version: app.getVersion(), platform: process.platform, url: CFG.url, host: seg(require('os').hostname() || '', 60) }));   /* 1.3.1 — اسم الجهاز: الوكيل يُعرَف به في الغرفة */
+ipcMain.handle('tf-desktop-info', (ev) => fromApp(ev) ? ({ version: app.getVersion(), platform: process.platform, url: CFG.url, host: seg(require('os').hostname() || '', 60) }) : { ok: false, error: 'origin' });   /* 1.3.1 — اسم الجهاز: الوكيل يُعرَف به في الغرفة */
 /* الغلاف 1.1 — من صفحة المحطة وحدها */
 const fromApp = (ev) => !!(ev.senderFrame && isAppUrl(ev.senderFrame.url));   /* 1.4.1 — الأصل كاملاً لا بادئته */
 ipcMain.on('tf-badge', (ev, n) => { if (fromApp(ev)) setBadge(n); });
@@ -536,7 +582,7 @@ ipcMain.on('tf-titlebar', (ev, o) => {
 });
 const WIN_CMD = {
   reload: () => win.webContents.reload(),
-  devtools: () => win.webContents.toggleDevTools(),
+  devtools: () => { if (DEVTOOLS) win.webContents.toggleDevTools(); },
   fullscreen: () => win.setFullScreen(!win.isFullScreen()),
   quit: () => { quitting = true; app.quit(); },
   undo: () => win.webContents.undo(), redo: () => win.webContents.redo(),
@@ -601,11 +647,13 @@ async function mediaIn(p) {
    · بعد الموافقة ترسم الصفحة المقاسات بمصنع الصور وتطلب من الغلاف كتابتها (tf-agent-write).
    والغلاف لا يقرأ إلّا من جذر المصدر ولا يكتب إلّا في الوجهات — ما تقوله الصفحة لا يوسّع ذلك.
    · يبدأ وحده مع البرنامج لكلّ حسابٍ مخوَّل، إلّا إن أوقفه صاحب الجهاز («أوقف على هذا الجهاز»). */
-const AGENT = { on: false, cfg: null, timer: null, seen: new Map(), busy: false, day: '', found: [], n: 0 };
+const AGENT = { on: false, cfg: null, timer: null, seen: new Map(), busy: false, day: '', mk: '', found: [], n: 0 };
 const AG_IMG = /\.(jpe?g|png)$/i;
 const AG_MAX = 80 * 1048576;
-function agDay(fmt, d) {
-  d = d || new Date(); const p = (x) => String(x).padStart(2, '0');
+/* 1.5.0 — يوم البثّ يبدأ بساعة بدء اليوم في سياسة المحطّة (الرَّن داون · ٦ افتراضاً) لا بمنتصف الليل:
+   بين منتصف الليل والسادسة صباحاً الصورة ليوم البثّ السابق — المجلّد المراقَب ويوم الحجز في القاعدة (air_day) يومٌ واحد */
+function agDay(fmt, d, startH) {
+  d = d || new Date(Date.now() - (Number.isInteger(startH) && startH > 0 && startH <= 12 ? startH : 0) * 3600000); const p = (x) => String(x).padStart(2, '0');
   const Y = d.getFullYear(), M = p(d.getMonth() + 1), D = p(d.getDate());
   return fmt === 'DD-MM-YYYY' ? D + '-' + M + '-' + Y : fmt === 'YYYYMMDD' ? Y + M + D : fmt === 'DD.MM.YYYY' ? D + '.' + M + '.' + Y : Y + '-' + M + '-' + D;
 }
@@ -637,7 +685,8 @@ function agValid(c) {
     sizes: (Array.isArray(d.sizes) ? d.sizes : []).map(String), segs: (Array.isArray(d.segs) ? d.segs : []).map(String) })).filter((d) => d.id && d.name && PATH_OK.test(d.path));
   if (!sizes.length || !segments.length) return null;
   const pat = (v, def) => (/^[^:*?"<>|]{1,120}$/.test(String(v || '')) && !/\.\./.test(String(v)) ? String(v) : def);
-  return { src, custom: src !== String(c.src || ''), sizes, segments, dests, dayFmt: String(c.dayFmt || 'YYYY-MM-DD'),
+  const dsh = Math.round(Number(c.dayStart));   /* 1.5.0 — ساعة بدء يوم البثّ (٠–١٢) — بلاها منتصف الليل كما كان */
+  return { src, custom: src !== String(c.src || ''), sizes, segments, dests, dayFmt: String(c.dayFmt || 'YYYY-MM-DD'), dayStart: Number.isInteger(dsh) && dsh >= 0 && dsh <= 12 ? dsh : 0,
     srcPattern: pat(c.srcPattern, '{day}\\{segment}'), outPattern: pat(c.outPattern, '{day}\\{bulletin}\\{segment}\\{size}'), filePattern: pat(c.filePattern, '{bulletin}_{segment}_{n}_{size}') };
 }
 /* داخل الجذر فعلاً: المسار المطبَّع يبدأ بالجذر وفاصلٍ — لا «..» ولا جذرٌ يشبهه («\\NEWS\gfx2» ليس داخل «\\NEWS\gfx») */
@@ -650,7 +699,7 @@ function agState() {
   const c = AGENT.cfg;
   return { on: AGENT.on, paused: !!CFG.agentPaused, day: AGENT.day, n: AGENT.n, custom: !!(c && c.custom), src: c ? c.src : '',
     segs: c ? c.segments.map((s) => s.id) : [], found: AGENT.found.slice(0, 30),
-    watching: c ? c.segments.map((s) => agJoin(c.src, agFill(c.srcPattern, { day: agDay(c.dayFmt), segment: s.dir }))) : [] };
+    watching: c ? c.segments.map((s) => agJoin(c.src, agFill(c.srcPattern, { day: agDay(c.dayFmt, null, c.dayStart), segment: s.dir }))) : [] };
 }
 function agEmit(e) {
   AGENT.found.unshift(e); if (AGENT.found.length > 60) AGENT.found.length = 60; AGENT.n++;
@@ -660,8 +709,11 @@ async function agTick() {
   if (!AGENT.on || !AGENT.cfg || AGENT.busy) return;
   AGENT.busy = true;
   try {
-    const c = AGENT.cfg, day = agDay(c.dayFmt);
+    const c = AGENT.cfg, day = agDay(c.dayFmt, null, c.dayStart);
     if (day !== AGENT.day) { AGENT.day = day; AGENT.seen.clear(); }
+    /* 1.5.0 — مجلّدات اليوم مع بداية يوم البثّ ومع كلّ إعدادٍ جديد (جذرٌ أو مشهدٌ أُضيف في منتصف اليوم) — مرّةً لكلّ حال */
+    const mk = day + '|' + c.src + '|' + c.srcPattern + '|' + c.segments.map((s) => s.dir).join('|');
+    if (mk !== AGENT.mk) { AGENT.mk = mk; await agMkDay(c, day); }
     for (const sg of c.segments) {
       const dir = agJoin(c.src, agFill(c.srcPattern, { day, segment: sg.dir }));
       let names = [];
@@ -684,6 +736,15 @@ async function agTick() {
       }
     }
   } finally { AGENT.busy = false; }
+}
+/* 1.5.0 — مجلّد اليوم ومجلّد كلّ مشهد يُنشآن وحدهما مع بداية يوم البثّ — داخل جذر المصدر وحده، وما يتعذّر يُترك
+   (مصدرٌ للقراءة وحدها على الشبكة لا يوقف المراقبة) */
+async function agMkDay(c, day) {
+  for (const sg of c.segments) {
+    const dir = agJoin(c.src, agFill(c.srcPattern, { day, segment: sg.dir }));
+    if (!agInside(c.src, dir)) continue;
+    try { await within(fs.promises.mkdir(dir, { recursive: true }), 6000); } catch (e) {}
+  }
 }
 function agStart(cfg) {
   AGENT.cfg = cfg; AGENT.on = true;
@@ -745,9 +806,42 @@ ipcMain.handle('tf-agent-write', async (ev, o) => {
   try {
     await within(fs.promises.mkdir(dir, { recursive: true }), 8000);
     await within(fs.promises.writeFile(tmp, Buffer.from(bytes.buffer ? new Uint8Array(bytes.buffer, bytes.byteOffset || 0, bytes.byteLength) : bytes)), 20000);
+    /* 1.5.0 — النسخة السابقة بالاسم نفسه لا تُمحى: تنتقل إلى _old بجانبها بختم وقتها — والبثّ يأخذ الجديدة باسمها الثابت.
+       إن تعذّر نقلها تُكتب الجديدة فوقها كما كان (البثّ أوّلاً) ويُقال ذلك */
+    let old = '', oldErr = '';
+    if (await agExists(dest)) {
+      const od = PX(dir).join(dir, '_old'), ext = PX(name).extname(name), base = name.slice(0, name.length - ext.length);
+      const P2 = (x) => String(x).padStart(2, '0'), d = new Date(), stamp = d.getFullYear() + P2(d.getMonth() + 1) + P2(d.getDate()) + '-' + P2(d.getHours()) + P2(d.getMinutes()) + P2(d.getSeconds());
+      try { await within(fs.promises.mkdir(od, { recursive: true }), 8000); old = PX(od).join(od, base + '_' + stamp + ext); await within(fs.promises.rename(dest, old), 8000); }
+      catch (e) { old = ''; oldErr = errOf(e); }
+    }
     await within(fs.promises.rename(tmp, dest), 8000);
-    return { ok: true, out: dest };
+    return Object.assign({ ok: true, out: dest }, old ? { old } : {}, oldErr ? { oldErr } : {});
   } catch (e) { try { await fs.promises.unlink(tmp); } catch (x) {} return { ok: false, error: errOf(e) }; }
+});
+async function agExists(f) { try { await within(fs.promises.access(f), 6000); return true; } catch (e) { return false; } }
+/* 1.5.0 — «اختبر»: المصدر يُقرأ · مجلّد اليوم لكلّ مشهد يُقرأ · كلّ وجهةٍ تُكتب (ملفٌّ مؤقّت يُحذف فوراً) — من هذا الجهاز،
+   داخل الجذر والوجهات من الإعداد وحدها، بلا إنشاء مجلّد (الاختبار يقول ما هو كائن) */
+ipcMain.handle('tf-agent-test', async (ev) => {
+  if (!fromApp(ev)) return { ok: false, error: 'origin' };
+  const c = AGENT.cfg;
+  if (!c) return { ok: false, error: 'no_config' };
+  const day = agDay(c.dayFmt, null, c.dayStart), out = { ok: true, day, src: null, segs: [], dests: [] };
+  try { await within(fs.promises.readdir(c.src), 6000); out.src = { ok: true, path: c.src }; } catch (e) { out.src = { ok: false, path: c.src, error: errOf(e) }; }
+  for (const sg of c.segments) {
+    const dir = agJoin(c.src, agFill(c.srcPattern, { day, segment: sg.dir }));
+    if (!agInside(c.src, dir)) continue;
+    try { await within(fs.promises.readdir(dir), 6000); out.segs.push({ id: sg.id, dir, ok: true }); } catch (e) { out.segs.push({ id: sg.id, dir, ok: false, error: errOf(e) }); }
+  }
+  for (const d of c.dests) {
+    const probe = PX(d.path).join(d.path, '.tf-probe-' + require('crypto').randomBytes(4).toString('hex') + '.tmp');
+    try {
+      await within(fs.promises.writeFile(probe, 'TakeFlow'), 8000);
+      try { await within(fs.promises.unlink(probe), 6000); } catch (e) {}
+      out.dests.push({ id: d.id, name: d.name, path: d.path, ok: true });
+    } catch (e) { out.dests.push({ id: d.id, name: d.name, path: d.path, ok: false, error: errOf(e) }); }
+  }
+  return out;
 });
 /* مجلّد المصدر الخاصّ بهذا الجهاز: بنافذة النظام لا بكتابة المسار */
 ipcMain.handle('tf-agent-pick', async (ev) => {
@@ -766,7 +860,7 @@ ipcMain.handle('tf-agent-scan', async (ev) => {
   if (!fromApp(ev)) return { ok: false, error: 'origin' };
   const c = AGENT.cfg;
   if (!c) return { ok: false, error: 'no_config' };
-  const day = agDay(c.dayFmt), files = [];
+  const day = agDay(c.dayFmt, null, c.dayStart), files = [];
   for (const sg of c.segments) {
     if (files.length >= AG_SCAN_MAX) break;
     const dir = agJoin(c.src, agFill(c.srcPattern, { day, segment: sg.dir }));
@@ -786,7 +880,7 @@ ipcMain.handle('tf-agent-scan', async (ev) => {
 });
 
 ipcMain.handle('tf-desk-caps', (ev) => fromApp(ev)
-  ? { v: '1.3.2', auto: !!MEDIA.root && PATH_OK.test(MEDIA.root), avid: !!MEDIA.avidWatch && PATH_OK.test(MEDIA.avidWatch), paths: !!CFG.openPaths, version: app.getVersion(), updates: UPD.configured, agent: !CFG.agentPaused, agentOn: AGENT.on }
+  ? { v: '1.6.0', llm: true, asr: asrReady(), sys: true, agentTest: true, oldDir: true, dayStart: true, auto: !!MEDIA.root && PATH_OK.test(MEDIA.root), avid: !!MEDIA.avidWatch && PATH_OK.test(MEDIA.avidWatch), paths: !!CFG.openPaths, version: app.getVersion(), updates: UPD.configured, agent: !CFG.agentPaused, agentOn: AGENT.on, devtools: DEVTOOLS, safePaths: true }
   : {});
 
 /* ═══ 1.2.1 — الطباعة: PDF مباشرٌ إلى «التنزيلات» بلا نافذةٍ منبثقة ═══
@@ -1008,4 +1102,162 @@ ipcMain.handle('tf-avid-send', async (ev, o) => {
     try { await fs.promises.unlink(tmp); } catch (e2) {}
     return { ok: false, error: e && e.code === 'ESIZE' ? 'size_mismatch' : errOf(e) };
   }
+});
+
+/* ═══════════════════════════════════════════════════════════════════
+   الغلاف 1.6.0 (v661) — جهاز المحطّة: الذكاء المحلّيّ (Ollama) والتفريغ (whisper.cpp)
+   ─────────────────────────────────────────────────────────────────
+   · tf-llm: Ollama على هذا الجهاز وحده — 127.0.0.1:11434، أو عنوانٌ محلّيّ يكتبه صاحب الجهاز في config.json (ollama.url)؛
+       الصفحة لا تختار العنوان. status · list · gen (نموذجٌ باسمٍ صالح · نصٌّ بسقف · التفكير لا يصل الصفحة) ·
+       pull (تنزيل نموذج — التقدّم حدث tf-llm-pull) · del. النصّ يذهب إلى برنامجٍ على الجهاز نفسه ولا يخرج منه.
+   · tf-asr: whisper.cpp — البرنامج والنموذج يختارهما صاحب الجهاز من نافذة النظام (tf-asr-pick) ويُحفظان في config.json؛
+       الصفحة تسلّم صوتاً (WAV) فيكتبه الغلاف ملفّاً مؤقّتاً ويشغّل البرنامج بوسائط ثابتة (لا سطر أوامر من الصفحة)
+       ويقرأ JSON الناتج — ثمّ يمحو المؤقّت. واحدٌ في كلّ مرّة، بمهلة عشرين دقيقة.
+   · tf-sys: الذاكرة والمساحة الحرّة والمعالج — لتقول الصفحة أيّ نموذجٍ يناسب الجهاز.
+   ═══════════════════════════════════════════════════════════════════ */
+const LLM = { base: 'http://127.0.0.1:11434', pulls: new Map() };
+(() => { try { const u = new URL(String((CFG.ollama && CFG.ollama.url) || '')); if (u.protocol === 'http:' && /^(127\.0\.0\.1|localhost|\[::1\])$/i.test(u.hostname)) LLM.base = u.origin; } catch (e) {} })();
+const LLM_NAME = /^[a-z0-9][a-z0-9._-]{0,60}(?:\/[a-z0-9][a-z0-9._-]{0,60}){0,2}(?::[a-z0-9][a-z0-9._-]{0,40})?$/i;
+const LLM_MAX = 24000, LLM_SYS_MAX = 4000;
+async function llmFetch(p, o, ms) {
+  const ctl = new AbortController(), t = setTimeout(() => ctl.abort(), ms || 5000);
+  try { return await fetch(LLM.base + p, Object.assign({ signal: ctl.signal }, o || {})); } finally { clearTimeout(t); }
+}
+/* لا نصّ خطأٍ خام إلى الصفحة — رمزٌ تقوله بلغتها */
+const llmErr = (e) => (e && e.name === 'AbortError') ? 'timeout'
+  : /ECONNREFUSED|ECONNRESET|fetch failed|EHOSTUNREACH/i.test(String((e && e.message) || '') + ' ' + String((e && e.cause && e.cause.code) || '')) ? 'off' : 'failed';
+const llmJSON = (o) => ({ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(o) });
+ipcMain.handle('tf-llm', async (ev, o) => {
+  if (!fromApp(ev)) return { ok: false, error: 'origin' };
+  const op = String((o && o.op) || ''), model = String((o && o.model) || '').trim();
+  try {
+    if (op === 'status') {
+      let r;
+      try { r = await llmFetch('/api/version', {}, 2500); } catch (e) { return { ok: true, on: false, why: llmErr(e) }; }   /* غير مثبّت أو متوقّف — حالٌ لا خطأ */
+      if (!r.ok) return { ok: true, on: false, why: 'failed' };
+      const j = await r.json().catch(() => ({}));
+      return { ok: true, on: true, version: String(j.version || '').slice(0, 20) };
+    }
+    if (op === 'list') {
+      const r = await llmFetch('/api/tags', {}, 5000);
+      if (!r.ok) return { ok: false, error: 'off' };
+      const j = await r.json().catch(() => ({}));
+      const models = (Array.isArray(j.models) ? j.models : []).slice(0, 60).map((m) => ({ name: String(m.name || m.model || '').slice(0, 120), size: Number(m.size) || 0,
+        family: String((m.details && m.details.family) || '').slice(0, 40), params: String((m.details && m.details.parameter_size) || '').slice(0, 20) })).filter((m) => LLM_NAME.test(m.name));
+      return { ok: true, models, pulling: [...LLM.pulls.keys()] };
+    }
+    if (!LLM_NAME.test(model)) return { ok: false, error: 'bad_model' };
+    if (op === 'gen') {
+      const prompt = String((o && o.prompt) || ''), system = String((o && o.system) || '');
+      if (!prompt.trim() || prompt.length > LLM_MAX || system.length > LLM_SYS_MAX) return { ok: false, error: 'bad_prompt' };
+      const temp = Math.max(0, Math.min(1, Number.isFinite(Number(o && o.temp)) ? Number(o.temp) : 0.3));
+      const t0 = Date.now();
+      const r = await llmFetch('/api/generate', llmJSON({ model, prompt, system: system || undefined, stream: false, think: false, options: { temperature: temp, num_ctx: 8192 } }), 180000);
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) return { ok: false, error: /not found|pull/i.test(String(j.error || '')) ? 'no_model' : 'failed' };
+      const text = String(j.response || '').replace(/<think>[\s\S]*?<\/think>/g, '').trim();
+      return text ? { ok: true, text: text.slice(0, 40000), ms: Date.now() - t0, model } : { ok: false, error: 'empty' };
+    }
+    if (op === 'pull') {
+      if (LLM.pulls.has(model)) return { ok: true, busy: true };
+      if (LLM.pulls.size >= 1) return { ok: false, error: 'busy' };
+      const wc = ev.sender, ctl = new AbortController();
+      const send = (d) => { try { if (wc && !wc.isDestroyed()) wc.send('tf-llm-pull', Object.assign({ model }, d)); } catch (e) {} };
+      LLM.pulls.set(model, ctl);
+      (async () => {
+        let done = false;
+        try {
+          const r = await fetch(LLM.base + '/api/pull', Object.assign({ signal: ctl.signal }, llmJSON({ model, name: model, stream: true })));
+          if (!r.ok || !r.body) throw Object.assign(new Error('pull'), { code: r.status === 404 ? 'no_model' : 'failed' });
+          let buf = '', last = -1;
+          for await (const ch of r.body) {
+            buf += Buffer.from(ch).toString('utf8');
+            let i;
+            while ((i = buf.indexOf('\n')) >= 0) {
+              const line = buf.slice(0, i).trim(); buf = buf.slice(i + 1);
+              if (!line) continue;
+              let j; try { j = JSON.parse(line); } catch (e) { continue; }
+              if (j.error) throw Object.assign(new Error('pull'), { code: /not found|manifest/i.test(String(j.error)) ? 'no_model' : 'failed' });
+              if (j.status === 'success') { done = true; continue; }
+              const pct = j.total ? Math.min(99, Math.floor((Number(j.completed) || 0) / Number(j.total) * 100)) : null;
+              if (pct !== null && pct !== last) { last = pct; send({ status: 'pulling', pct }); }
+            }
+          }
+          send(done ? { status: 'success', pct: 100 } : { status: 'error', error: 'failed' });
+        } catch (e) { send({ status: 'error', error: e && (e.code === 'no_model' || e.code === 'failed') ? e.code : llmErr(e) }); }
+        finally { LLM.pulls.delete(model); }
+      })();
+      return { ok: true, started: true };
+    }
+    if (op === 'del') {
+      const r = await llmFetch('/api/delete', Object.assign(llmJSON({ model, name: model }), { method: 'DELETE' }), 15000);
+      return r.ok ? { ok: true } : { ok: false, error: r.status === 404 ? 'no_model' : 'failed' };
+    }
+    return { ok: false, error: 'bad_op' };
+  } catch (e) { return { ok: false, error: llmErr(e) }; }
+});
+
+const ASR = { bin: '', model: '', busy: false };
+if (CFG.whisper && typeof CFG.whisper === 'object') { ASR.bin = String(CFG.whisper.bin || ''); ASR.model = String(CFG.whisper.model || ''); }
+const asrFile = (p) => { try { return !!p && PATH_OK.test(p) && fs.statSync(p).isFile(); } catch (e) { return false; } };
+const asrReady = () => asrFile(ASR.bin) && asrFile(ASR.model);
+const asrState = () => ({ ok: true, ready: asrReady(), bin: ASR.bin ? path.basename(ASR.bin) : '', model: ASR.model ? path.basename(ASR.model) : '', busy: ASR.busy });
+async function asrPick(kind) {
+  try {
+    const r = await dialog.showOpenDialog(win && !win.isDestroyed() ? win : undefined, kind === 'bin'
+      ? { title: 'برنامج whisper.cpp (whisper-cli)', properties: ['openFile'], filters: process.platform === 'win32' ? [{ name: 'whisper-cli', extensions: ['exe'] }] : [] }
+      : { title: 'نموذج whisper.cpp (ggml)', properties: ['openFile'], filters: [{ name: 'ggml', extensions: ['bin', 'gguf'] }] });
+    if (!r || r.canceled || !r.filePaths || !r.filePaths[0]) return false;
+    const v = r.filePaths[0];
+    if (!asrFile(v)) return false;
+    if (kind === 'model' && !/\.(bin|gguf)$/i.test(v)) return false;
+    ASR[kind] = v;
+    const f = path.join(app.getPath('userData'), 'config.json');
+    let cur = {};
+    try { cur = JSON.parse(fs.readFileSync(f, 'utf8')); } catch (e) { cur = Object.assign({}, CFG); }
+    cur.whisper = Object.assign({}, cur.whisper || {}, { [kind]: v });
+    fs.writeFileSync(f, JSON.stringify(cur, null, 2));
+    return true;
+  } catch (e) { console.error('asrPick', e.message); return false; }
+}
+ipcMain.handle('tf-asr-pick', async (ev, k) => (fromApp(ev) && (k === 'bin' || k === 'model')) ? Object.assign(asrState(), { picked: await asrPick(k) }) : { ok: false, error: 'origin' });
+const ASR_MAX = 200 * 1048576;
+ipcMain.handle('tf-asr', async (ev, o) => {
+  if (!fromApp(ev)) return { ok: false, error: 'origin' };
+  if (String((o && o.op) || '') === 'state') return asrState();
+  if (!asrReady()) return { ok: false, error: 'not_set' };
+  if (ASR.busy) return { ok: false, error: 'busy' };
+  const b = o && o.bytes;
+  if (!b || typeof b.byteLength !== 'number' || b.byteLength < 44 || b.byteLength > ASR_MAX) return { ok: false, error: 'bad_audio' };
+  const buf = Buffer.from(b.buffer ? new Uint8Array(b.buffer, b.byteOffset || 0, b.byteLength) : b);
+  if (buf.toString('ascii', 0, 4) !== 'RIFF' || buf.toString('ascii', 8, 12) !== 'WAVE') return { ok: false, error: 'bad_audio' };
+  const lang = ['ar', 'en', 'auto'].includes(o && o.lang) ? o.lang : 'auto';
+  ASR.busy = true;
+  let dir = '';
+  try {
+    dir = fs.mkdtempSync(path.join(require('os').tmpdir(), 'tf-asr-'));
+    const wav = path.join(dir, 'in.wav'), outBase = path.join(dir, 'out');
+    await fs.promises.writeFile(wav, buf);
+    const threads = Math.max(1, Math.min(8, ((require('os').cpus() || []).length || 2) - 1));
+    await new Promise((res, rej) => {
+      const p = spawn(ASR.bin, ['-m', ASR.model, '-f', wav, '-l', lang, '-oj', '-of', outBase, '-np', '-t', String(threads)], { windowsHide: true, stdio: ['ignore', 'ignore', 'ignore'] });
+      const t = setTimeout(() => { try { p.kill(); } catch (e) {} rej(Object.assign(new Error('timeout'), { code: 'ETIMEOUT' })); }, 20 * 60000);
+      p.on('error', (e) => { clearTimeout(t); rej(e); });
+      p.on('close', (c) => { clearTimeout(t); c === 0 ? res() : rej(Object.assign(new Error('exit'), { code: 'EXIT' })); });
+    });
+    const j = JSON.parse(await fs.promises.readFile(outBase + '.json', 'utf8'));
+    const segs = (Array.isArray(j.transcription) ? j.transcription : []).slice(0, 5000).map((s) => ({
+      t0: Math.max(0, Number(s.offsets && s.offsets.from) / 1000 || 0), t1: Math.max(0, Number(s.offsets && s.offsets.to) / 1000 || 0), text: String(s.text || '').trim().slice(0, 2000) })).filter((s) => s.text);
+    return { ok: true, segs, lang: String((j.result && j.result.language) || lang).slice(0, 8) };
+  } catch (e) { return { ok: false, error: e && e.code === 'ETIMEOUT' ? 'timeout' : e && e.code === 'ENOENT' ? 'not_set' : 'failed' }; }
+  finally { ASR.busy = false; if (dir) { try { fs.rmSync(dir, { recursive: true, force: true }); } catch (e) {} } }
+});
+
+/* الجهاز: الذاكرة الكلّيّة والحرّة · المعالج · المساحة الحرّة حيث تُحفظ النماذج (مجلّد المستخدم) */
+ipcMain.handle('tf-sys', async (ev) => {
+  if (!fromApp(ev)) return { ok: false, error: 'origin' };
+  const os = require('os');
+  let disk = 0;
+  try { const s = await fs.promises.statfs(os.homedir()); disk = Number(s.bavail) * Number(s.bsize); } catch (e) { disk = 0; }
+  return { ok: true, mem: os.totalmem(), free: os.freemem(), cpus: (os.cpus() || []).length, disk, platform: process.platform };
 });

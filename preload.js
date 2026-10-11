@@ -13,7 +13,9 @@
      · on(قناة، دالّة) لأحداثٍ خمسةٍ بأسمائها فقط — الدالّة تتلقّى البيانات وحدها لا حدث Electron
    الغلاف 1.3.2: agentScan ما في مجلّدات مشاهد اليوم الآن («افحص المجلّد الآن») · updateFeed يقبل رابط مستودع GitHub
    الغلاف 1.4: chrome ('wco' ويندوز ولينكس · 'mac' · '' إطار النظام) — الصفحة ترسم شريط العنوان وقوائمه
-     · titlebar({color, symbolColor, height}) لون شريط أزرار النافذة · cmd(اسم) أوامر النافذة والتحرير من قائمةٍ مسموحة */
+     · titlebar({color, symbolColor, height}) لون شريط أزرار النافذة · cmd(اسم) أوامر النافذة والتحرير من قائمةٍ مسموحة
+   الغلاف 1.6.0: llm({op, model, prompt, system, temp}) Ollama على الجهاز · asr({op, lang, bytes}) whisper.cpp · asrPick('bin'|'model')
+     · sys() الذاكرة والمساحة · حدث tf-llm-pull (تقدّم تنزيل نموذج) */
 const { contextBridge, ipcRenderer } = require('electron');
 /* يصل من main.js (additionalArguments) — قراءةٌ متزامنة قبل أن تُرسم الصفحة، فلا يومض الإطار */
 const CHROME = (() => { const a = (process.argv || []).find(x => /^--tf-chrome=/.test(String(x))); const v = a ? String(a).split('=')[1] : ''; return v === 'wco' || v === 'mac' ? v : ''; })();
@@ -45,9 +47,15 @@ contextBridge.exposeInMainWorld('tfDesktop', {
   agentRead: (p) => ipcRenderer.invoke('tf-agent-read', String(p || '')),   /* 1.3.1 — من جذر المصدر وحده */
   agentWrite: (o) => ipcRenderer.invoke('tf-agent-write', { dir: String((o && o.dir) || ''), name: String((o && o.name) || ''), bytes: o && o.bytes }),   /* 1.3.1 — إلى الوجهات وحدها */
   agentPick: () => ipcRenderer.invoke('tf-agent-pick'),
-  agentScan: () => ipcRenderer.invoke('tf-agent-scan'),   /* 1.3.2 — أسماء صور اليوم في مجلّدات المشاهد (قراءة وحدها) */
+  agentScan: () => ipcRenderer.invoke('tf-agent-scan'),
+  agentTest: () => ipcRenderer.invoke('tf-agent-test'),   /* 1.5.0 — «اختبر»: المصدر ومجلّدات اليوم والوجهات من هذا الجهاز */   /* 1.3.2 — أسماء صور اليوم في مجلّدات المشاهد (قراءة وحدها) */
+  /* 1.6.0 — جهاز المحطّة: الذكاء المحلّيّ (Ollama) · التفريغ (whisper.cpp) · الجهاز */
+  llm: (o) => ipcRenderer.invoke('tf-llm', { op: String((o && o.op) || ''), model: String((o && o.model) || ''), prompt: String((o && o.prompt) || ''), system: String((o && o.system) || ''), temp: Number(o && o.temp) }),
+  asr: (o) => ipcRenderer.invoke('tf-asr', { op: String((o && o.op) || ''), lang: String((o && o.lang) || ''), bytes: o && o.bytes }),
+  asrPick: (k) => ipcRenderer.invoke('tf-asr-pick', String(k || '')),
+  sys: () => ipcRenderer.invoke('tf-sys'),
   on: (ch, cb) => {
-    if (!['tf-fs-arrived', 'tf-media-progress', 'tf-media-ready', 'tf-media-failed', 'tf-avid-progress', 'tf-update-state', 'tf-agent-file'].includes(ch) || typeof cb !== 'function') return false;
+    if (!['tf-fs-arrived', 'tf-media-progress', 'tf-media-ready', 'tf-media-failed', 'tf-avid-progress', 'tf-update-state', 'tf-agent-file', 'tf-llm-pull'].includes(ch) || typeof cb !== 'function') return false;
     ipcRenderer.on(ch, (e, d) => cb(d));
     return true;
   },
