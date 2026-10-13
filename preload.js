@@ -15,7 +15,9 @@
    الغلاف 1.4: chrome ('wco' ويندوز ولينكس · 'mac' · '' إطار النظام) — الصفحة ترسم شريط العنوان وقوائمه
      · titlebar({color, symbolColor, height}) لون شريط أزرار النافذة · cmd(اسم) أوامر النافذة والتحرير من قائمةٍ مسموحة
    الغلاف 1.6.0: llm({op, model, prompt, system, temp}) Ollama على الجهاز · asr({op, lang, bytes}) whisper.cpp · asrPick('bin'|'model')
-     · sys() الذاكرة والمساحة · حدث tf-llm-pull (تقدّم تنزيل نموذج) */
+     · sys() الذاكرة والمساحة · حدث tf-llm-pull (تقدّم تنزيل نموذج)
+   الغلاف 1.7.0: llm({…, images}) صورٌ للرؤية (base64 — ثلاثٌ على الأكثر) · vision: true (الصفحة تعرف أنّ الغلاف يحملها)
+   الغلاف 1.8.0: comfy({op:'status'|'run', workflow, timeoutMs}) ComfyUI على الجهاز — سير عملٍ بصيغة API وصورةٌ تعود بايتات */
 const { contextBridge, ipcRenderer } = require('electron');
 /* يصل من main.js (additionalArguments) — قراءةٌ متزامنة قبل أن تُرسم الصفحة، فلا يومض الإطار */
 const CHROME = (() => { const a = (process.argv || []).find(x => /^--tf-chrome=/.test(String(x))); const v = a ? String(a).split('=')[1] : ''; return v === 'wco' || v === 'mac' ? v : ''; })();
@@ -50,7 +52,10 @@ contextBridge.exposeInMainWorld('tfDesktop', {
   agentScan: () => ipcRenderer.invoke('tf-agent-scan'),
   agentTest: () => ipcRenderer.invoke('tf-agent-test'),   /* 1.5.0 — «اختبر»: المصدر ومجلّدات اليوم والوجهات من هذا الجهاز */   /* 1.3.2 — أسماء صور اليوم في مجلّدات المشاهد (قراءة وحدها) */
   /* 1.6.0 — جهاز المحطّة: الذكاء المحلّيّ (Ollama) · التفريغ (whisper.cpp) · الجهاز */
-  llm: (o) => ipcRenderer.invoke('tf-llm', { op: String((o && o.op) || ''), model: String((o && o.model) || ''), prompt: String((o && o.prompt) || ''), system: String((o && o.system) || ''), temp: Number(o && o.temp) }),
+  llm: (o) => ipcRenderer.invoke('tf-llm', { op: String((o && o.op) || ''), model: String((o && o.model) || ''), prompt: String((o && o.prompt) || ''), system: String((o && o.system) || ''), temp: Number(o && o.temp),
+    images: Array.isArray(o && o.images) ? o.images.slice(0, 3).map(String) : [] }),   /* 1.7.0 — الرؤية */
+  vision: true,   /* 1.7.0 */
+  comfy: (o) => ipcRenderer.invoke('tf-comfy', { op: String((o && o.op) || ''), workflow: o && o.workflow, timeoutMs: Number(o && o.timeoutMs) || 0 }),   /* 1.8.0 — ComfyUI على الجهاز */
   asr: (o) => ipcRenderer.invoke('tf-asr', { op: String((o && o.op) || ''), lang: String((o && o.lang) || ''), bytes: o && o.bytes }),
   asrPick: (k) => ipcRenderer.invoke('tf-asr-pick', String(k || '')),
   sys: () => ipcRenderer.invoke('tf-sys'),

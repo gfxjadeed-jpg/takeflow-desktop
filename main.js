@@ -880,7 +880,7 @@ ipcMain.handle('tf-agent-scan', async (ev) => {
 });
 
 ipcMain.handle('tf-desk-caps', (ev) => fromApp(ev)
-  ? { v: '1.6.0', llm: true, asr: asrReady(), sys: true, agentTest: true, oldDir: true, dayStart: true, auto: !!MEDIA.root && PATH_OK.test(MEDIA.root), avid: !!MEDIA.avidWatch && PATH_OK.test(MEDIA.avidWatch), paths: !!CFG.openPaths, version: app.getVersion(), updates: UPD.configured, agent: !CFG.agentPaused, agentOn: AGENT.on, devtools: DEVTOOLS, safePaths: true }
+  ? { v: '1.8.0', llm: true, vision: true, comfy: true, asr: asrReady(), sys: true, agentTest: true, oldDir: true, dayStart: true, auto: !!MEDIA.root && PATH_OK.test(MEDIA.root), avid: !!MEDIA.avidWatch && PATH_OK.test(MEDIA.avidWatch), paths: !!CFG.openPaths, version: app.getVersion(), updates: UPD.configured, agent: !CFG.agentPaused, agentOn: AGENT.on, devtools: DEVTOOLS, safePaths: true }
   : {});
 
 /* ═══ 1.2.1 — الطباعة: PDF مباشرٌ إلى «التنزيلات» بلا نافذةٍ منبثقة ═══
@@ -1118,7 +1118,9 @@ ipcMain.handle('tf-avid-send', async (ev, o) => {
 const LLM = { base: 'http://127.0.0.1:11434', pulls: new Map() };
 (() => { try { const u = new URL(String((CFG.ollama && CFG.ollama.url) || '')); if (u.protocol === 'http:' && /^(127\.0\.0\.1|localhost|\[::1\])$/i.test(u.hostname)) LLM.base = u.origin; } catch (e) {} })();
 const LLM_NAME = /^[a-z0-9][a-z0-9._-]{0,60}(?:\/[a-z0-9][a-z0-9._-]{0,60}){0,2}(?::[a-z0-9][a-z0-9._-]{0,40})?$/i;
-const LLM_MAX = 24000, LLM_SYS_MAX = 4000;
+/* 1.7.0 — الحدود أعلى (تعليمات البوت أطول من ٤٠٠٠) · السياق بقدر النصّ (٨١٩٢ ← ٣٢٧٦٨) · وصورٌ للرؤية (ثلاثٌ على الأكثر) */
+const LLM_MAX = 48000, LLM_SYS_MAX = 16000, LLM_IMG_MAX = 12 * 1024 * 1024;
+const llmCtx = (n) => Math.min(32768, Math.max(8192, Math.ceil((n / 2.2 + 2048) / 1024) * 1024));
 async function llmFetch(p, o, ms) {
   const ctl = new AbortController(), t = setTimeout(() => ctl.abort(), ms || 5000);
   try { return await fetch(LLM.base + p, Object.assign({ signal: ctl.signal }, o || {})); } finally { clearTimeout(t); }
@@ -1150,9 +1152,11 @@ ipcMain.handle('tf-llm', async (ev, o) => {
     if (op === 'gen') {
       const prompt = String((o && o.prompt) || ''), system = String((o && o.system) || '');
       if (!prompt.trim() || prompt.length > LLM_MAX || system.length > LLM_SYS_MAX) return { ok: false, error: 'bad_prompt' };
+      const imgs = Array.isArray(o && o.images) ? o.images : [];
+      if (imgs.length > 3 || imgs.some((x) => typeof x !== 'string' || !x || x.length > LLM_IMG_MAX || !/^[A-Za-z0-9+/]+={0,2}$/.test(x))) return { ok: false, error: 'bad_image' };
       const temp = Math.max(0, Math.min(1, Number.isFinite(Number(o && o.temp)) ? Number(o.temp) : 0.3));
       const t0 = Date.now();
-      const r = await llmFetch('/api/generate', llmJSON({ model, prompt, system: system || undefined, stream: false, think: false, options: { temperature: temp, num_ctx: 8192 } }), 180000);
+      const r = await llmFetch('/api/generate', llmJSON({ model, prompt, system: system || undefined, ...(imgs.length ? { images: imgs } : {}), stream: false, think: false, options: { temperature: temp, num_ctx: llmCtx(prompt.length + system.length) } }), imgs.length ? 300000 : 180000);
       const j = await r.json().catch(() => ({}));
       if (!r.ok) return { ok: false, error: /not found|pull/i.test(String(j.error || '')) ? 'no_model' : 'failed' };
       const text = String(j.response || '').replace(/<think>[\s\S]*?<\/think>/g, '').trim();
@@ -1192,6 +1196,84 @@ ipcMain.handle('tf-llm', async (ev, o) => {
     if (op === 'del') {
       const r = await llmFetch('/api/delete', Object.assign(llmJSON({ model, name: model }), { method: 'DELETE' }), 15000);
       return r.ok ? { ok: true } : { ok: false, error: r.status === 404 ? 'no_model' : 'failed' };
+    }
+    return { ok: false, error: 'bad_op' };
+  } catch (e) { return { ok: false, error: llmErr(e) }; }
+});
+
+/* ═══ 1.8.0 (v693) — جسر ComfyUI: توليد الصور على هذا الجهاز ═══
+   127.0.0.1:8188، أو عنوانٌ محلّيّ يكتبه صاحب الجهاز في config.json (comfy.url) — الصفحة لا تختار العنوان.
+   status: /system_stats (حالٌ لا خطأ إن لم يعمل) · run: سير عملٍ بصيغة API (كائن JSON — عقدٌ بأرقام · ٤٠٠ عقدةٍ و٥١٢ ك.ب على الأكثر)
+   ← POST /prompt ← /history/<المعرّف> كلّ ثانية حتّى تظهر صورة ← /view. الصورة الأولى من المخرجات (PNG أو JPEG · ٤٠ م.ب على الأكثر،
+   وتُعرف من بايتاتها لا من اسمها) تعود بايتاتٍ للصفحة. واحدٌ في كلّ مرّة، وبمهلةٍ عشر دقائق على الأكثر. لا نصّ خطأٍ خام إلى الصفحة. */
+const COMFY = { base: 'http://127.0.0.1:8188', busy: false, pollMs: 1000 };
+(() => { try { const u = new URL(String((CFG.comfy && CFG.comfy.url) || '')); if (u.protocol === 'http:' && /^(127\.0\.0\.1|localhost|\[::1\])$/i.test(u.hostname)) COMFY.base = u.origin; } catch (e) {} })();
+const COMFY_MAX_WF = 512 * 1024, COMFY_MAX_IMG = 40 * 1024 * 1024;
+async function comfyFetch(p, o, ms) {
+  const ctl = new AbortController(), t = setTimeout(() => ctl.abort(), ms || 5000);
+  try { return await fetch(COMFY.base + p, Object.assign({ signal: ctl.signal }, o || {})); } finally { clearTimeout(t); }
+}
+function comfyWfOk(wf) {
+  if (!wf || typeof wf !== 'object' || Array.isArray(wf)) return false;
+  const ks = Object.keys(wf);
+  if (!ks.length || ks.length > 400) return false;
+  return ks.every((k) => /^\d{1,6}(?::\d{1,6})*$/.test(k) && wf[k] && typeof wf[k] === 'object' && typeof wf[k].class_type === 'string' && /^[\w .+-]{1,120}$/.test(wf[k].class_type)
+    && wf[k].inputs && typeof wf[k].inputs === 'object' && !Array.isArray(wf[k].inputs));
+}
+const comfyImg = (b) => b.length > 8 && b.slice(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])) ? 'image/png' : (b.length > 3 && b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff) ? 'image/jpeg' : '';
+ipcMain.handle('tf-comfy', async (ev, o) => {
+  if (!fromApp(ev)) return { ok: false, error: 'origin' };
+  const op = String((o && o.op) || '');
+  try {
+    if (op === 'status') {
+      let r;
+      try { r = await comfyFetch('/system_stats', {}, 2500); } catch (e) { return { ok: true, on: false, why: llmErr(e) }; }
+      if (!r.ok) return { ok: true, on: false, why: 'failed' };
+      const j = await r.json().catch(() => ({}));
+      const d = Array.isArray(j.devices) && j.devices[0] ? j.devices[0] : {};
+      return { ok: true, on: true, version: String((j.system && (j.system.comfyui_version || '')) || '').slice(0, 30), gpu: String(d.name || '').slice(0, 80), vram: Number(d.vram_total) || 0, busy: COMFY.busy };
+    }
+    if (op === 'run') {
+      const wf = o && o.workflow;
+      let size = Infinity; try { size = JSON.stringify(wf).length; } catch (e) { size = Infinity; }
+      if (!comfyWfOk(wf) || size > COMFY_MAX_WF) return { ok: false, error: 'bad_workflow' };
+      if (COMFY.busy) return { ok: false, error: 'busy' };
+      COMFY.busy = true;
+      const t0 = Date.now(), until = t0 + Math.max(10000, Math.min(600000, Number(o && o.timeoutMs) || 300000));
+      try {
+        const r = await comfyFetch('/prompt', llmJSON({ prompt: wf, client_id: 'takeflow' }), 15000);
+        const j = await r.json().catch(() => ({}));
+        if (!r.ok || !j || !j.prompt_id) return { ok: false, error: j && (j.node_errors || j.error) ? 'bad_workflow' : 'failed' };
+        const pid = String(j.prompt_id).replace(/[^\w-]/g, '').slice(0, 80);
+        let img = null;
+        while (!img && Date.now() < until) {
+          await new Promise((res) => setTimeout(res, COMFY.pollMs));
+          let h = null; try { h = await comfyFetch('/history/' + pid, {}, 8000); } catch (e) { h = null; }
+          if (!h || !h.ok) continue;
+          const hj = await h.json().catch(() => ({})), e = hj && hj[pid];
+          if (!e) continue;
+          if (e.status && e.status.status_str === 'error') return { ok: false, error: 'failed' };
+          for (const k of Object.keys(e.outputs || {})) { const ims = (e.outputs[k] || {}).images; if (Array.isArray(ims) && ims[0] && ims[0].filename) { img = ims[0]; break; } }
+          if (!img && e.status && e.status.completed) return { ok: false, error: 'empty' };
+        }
+        if (!img) {
+          /* انتهت المهلة: لا تبقى المهمّة تشغل البطاقة — تُوقَف إن كانت تعمل الآن، وتُحذف من الطابور إن كانت تنتظر (هي وحدها، بمعرّفها) */
+          try {
+            const qr = await comfyFetch('/queue', {}, 3000), qj = await qr.json().catch(() => ({}));
+            const running = (Array.isArray(qj.queue_running) ? qj.queue_running : []).some((x) => Array.isArray(x) && String(x[1]) === pid);
+            if (running) await comfyFetch('/interrupt', { method: 'POST' }, 3000);
+            else await comfyFetch('/queue', llmJSON({ delete: [pid] }), 3000);
+          } catch (e) {}
+          return { ok: false, error: 'timeout' };
+        }
+        const q = new URLSearchParams({ filename: String(img.filename).slice(0, 200), subfolder: String(img.subfolder || '').slice(0, 200), type: ['output', 'temp'].includes(img.type) ? img.type : 'output' });
+        const v = await comfyFetch('/view?' + q.toString(), {}, 60000);
+        if (!v.ok) return { ok: false, error: 'failed' };
+        if (Number(v.headers.get('content-length')) > COMFY_MAX_IMG) return { ok: false, error: 'bad_image' };   /* قبل أن يُقرأ إلى الذاكرة */
+        const buf = Buffer.from(await v.arrayBuffer()), type = comfyImg(buf);
+        if (!type || buf.length > COMFY_MAX_IMG) return { ok: false, error: 'bad_image' };
+        return { ok: true, bytes: new Uint8Array(buf), type, ms: Date.now() - t0 };
+      } finally { COMFY.busy = false; }
     }
     return { ok: false, error: 'bad_op' };
   } catch (e) { return { ok: false, error: llmErr(e) }; }
