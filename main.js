@@ -44,6 +44,13 @@
      • الذكاء المحلّيّ: Ollama على الجهاز نفسه (127.0.0.1) — الحالة والنماذج والتنزيل والتوليد (tf-llm)
      • التفريغ: whisper.cpp يختاره صاحب الجهاز (برنامجٌ ونموذج) ويُشغَّل بوسائط ثابتة (tf-asr · tf-asr-pick)
      • الذاكرة والمساحة (tf-sys) — والطابور نفسه في القاعدة: الجهاز يسأل ولا يُفتح فيه منفذ
+   الغلاف 1.9.0 (v700) — التوليد والنصّ فوق البرامج:
+     • «النصّ فوق البرامج»: نافذة النصّ الكامل (tf-text-pin) تُفتح نافذةً صغيرة تبقى فوق برنامج المونتاج والتصميم
+       (alwaysOnTop) — كانت تُمنع فتظهر لوحةً داخل الصفحة. نافذةٌ فارغة باسمها وحده، بلا تنقّلٍ ولا نوافذ منها
+     • ComfyUI على الشبكة الداخليّة: عنوانٌ خاصّ (10.x · 172.16–31.x · 192.168.x) في config.json أو من الصفحة
+       بعد موافقة صاحب الجهاز في نافذة النظام نفسها — الصفحة تقترح ولا تقرّر · /object_info: العقد والنماذج المثبّتة
+       (فحص القوالب قبل التوليد)
+     • نماذج whisper.cpp في مجلّد النموذج المختار — يُبدَّل بينها بلا نافذة ملفّات (من المجلّد نفسه وحده)
    الأمان: contextIsolation، لا nodeIntegration، الروابط الخارجيّة في المتصفّح،
    وفتح المسارات مقيّدٌ بشكل مسارٍ محلّيّ/شبكيّ لا رابط. وكلّ قنوات 1.2 من صفحة المحطة وحدها،
    والمعاينة برمزٍ عشوائيّ يصدره الغلاف لملفٍّ بعينه — لا مسار في الرابط.
@@ -55,7 +62,7 @@ const crypto = require('crypto');
 const { spawn } = require('child_process');
 const { Readable } = require('stream');
 
-const CFG_DEFAULT = { url: 'https://takeflowtv.vercel.app', openPaths: true, zoom: 1.0, closeToTray: true, updates: { enabled: false } };
+const CFG_DEFAULT = { url: 'https://aljadeedtv.takeflowtv.com', openPaths: true, zoom: 1.0, closeToTray: true, updates: { enabled: false } };
 function loadConfig() {
   const out = Object.assign({}, CFG_DEFAULT);
   for (const p of [path.join(app.getPath('userData'), 'config.json'), path.join(__dirname, 'config.json')]) {
@@ -164,7 +171,13 @@ function createWindow() {
   });
   win.on('focus', () => { try { win.flashFrame(false); } catch (e) {} });
   /* الروابط: داخل التطبيق لموقع المحطة، ونافذةٌ منبثقة لربط البريد، والباقي في المتصفّح */
-  win.webContents.setWindowOpenHandler(({ url }) => {
+  win.webContents.setWindowOpenHandler(({ url, frameName }) => {
+    /* 1.9.0 — «النصّ فوق البرامج»: نافذةٌ فارغة باسمها وحده (tf-pin.js يكتب فيها) تبقى فوق البرامج.
+       about:blank وحدها — أيّ رابطٍ آخر بهذا الاسم يمرّ بالقاعدة العامّة تحت */
+    if (frameName === 'tf-text-pin' && (url === 'about:blank' || url === '')) {
+      return { action: 'allow', overrideBrowserWindowOptions: { width: 460, height: 720, minWidth: 320, minHeight: 300, alwaysOnTop: true, autoHideMenuBar: true,
+        title: 'TakeFlow TV', backgroundColor: '#0f1320', icon: ICON, webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true, devTools: DEVTOOLS } } };
+    }
     try {
       const o = new URL(url).origin;
       if (POPUP_OK.includes(o) || isAppOrigin(o)) return { action: 'allow', overrideBrowserWindowOptions: { width: 560, height: 720, autoHideMenuBar: true, webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true, devTools: DEVTOOLS } } };
@@ -174,6 +187,16 @@ function createWindow() {
   });
   win.webContents.on('will-navigate', (ev, url) => {
     try { if (!isAppUrl(url)) { ev.preventDefault(); openExt(url); } } catch (e) { ev.preventDefault(); }
+  });
+  /* 1.9.0 — نافذة النصّ: فوق البرامج كلّها (وفوق ملء الشاشة في ماك) · لا تنتقل إلى أيّ مكان ولا تفتح نوافذ · نسخٌ ولصقٌ بالنقر الأيمن */
+  win.webContents.on('did-create-window', (child, d) => {
+    if (!d || d.frameName !== 'tf-text-pin') return;
+    try { child.setAlwaysOnTop(true, 'floating'); } catch (e) {}
+    try { if (process.platform === 'darwin') child.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true }); } catch (e) {}
+    try { child.setMenuBarVisibility(false); } catch (e) {}
+    child.webContents.setWindowOpenHandler(({ url }) => { try { openExt(url); } catch (e) {} return { action: 'deny' }; });
+    child.webContents.on('will-navigate', (ev) => ev.preventDefault());
+    try { wireContextMenu(child.webContents); } catch (e) {}
   });
   /* 1.4.1 — انتقلت المحطّة إلى نطاقها الخاصّ: يُحفظ العنوان الجديد فيفتح التطبيق عليه في المرّة التالية */
   win.webContents.on('did-navigate', (ev, url) => { try { rememberAppUrl(url); } catch (e) {} });
@@ -189,6 +212,39 @@ function createWindow() {
 }
 
 /* ── الأيقونة بجانب الساعة ── */
+/* 1.8.1 — القائمة السياقيّة: ما تحت المؤشّر يقرّر ما يظهر. الرابط يُنسخ أو يُفتح في المتصفّح (لا داخل التطبيق إلّا لموقع المحطة) */
+function wireContextMenu(wc) {
+  if (!wc || wc._tfCtx) return;
+  wc._tfCtx = true;
+  wc.on('context-menu', (_ev, p) => {
+    const it = [];
+    const ed = p.editFlags || {};
+    if (p.misspelledWord && Array.isArray(p.dictionarySuggestions) && p.dictionarySuggestions.length) {
+      p.dictionarySuggestions.slice(0, 5).forEach(w => it.push({ label: w, click: () => wc.replaceMisspelling(w) }));
+      it.push({ type: 'separator' });
+    }
+    if (p.isEditable) {
+      it.push({ label: 'تراجع', role: 'undo', enabled: !!ed.canUndo }, { label: 'إعادة', role: 'redo', enabled: !!ed.canRedo }, { type: 'separator' },
+        { label: 'قصّ', role: 'cut', enabled: !!ed.canCut }, { label: 'نسخ', role: 'copy', enabled: !!ed.canCopy },
+        { label: 'لصق', role: 'paste', enabled: !!ed.canPaste }, { label: 'لصقٌ بلا تنسيق', role: 'pasteAndMatchStyle', enabled: !!ed.canPaste },
+        { type: 'separator' }, { label: 'تحديد الكلّ', role: 'selectAll', enabled: !!ed.canSelectAll });
+    } else if (p.selectionText && String(p.selectionText).trim()) {
+      it.push({ label: 'نسخ', role: 'copy' }, { label: 'تحديد الكلّ', role: 'selectAll' });
+    }
+    if (p.linkURL && /^https?:/i.test(p.linkURL)) {
+      if (it.length) it.push({ type: 'separator' });
+      it.push({ label: 'انسخ الرابط', click: () => { try { require('electron').clipboard.writeText(p.linkURL); } catch (e) {} } });
+      it.push({ label: 'افتح في المتصفّح', click: () => { try { openExt(p.linkURL); } catch (e) {} } });   /* openExt وحدها: الويب والبريد (v652) */
+    }
+    if (p.mediaType === 'image' && p.srcURL) {
+      if (it.length) it.push({ type: 'separator' });
+      it.push({ label: 'انسخ الصورة', click: () => { try { wc.copyImageAt(p.x, p.y); } catch (e) {} } });
+    }
+    if (!it.length) it.push({ label: 'تحديد الكلّ', role: 'selectAll' });
+    let w = null; try { w = BrowserWindow.fromWebContents(wc) || null; } catch (e) { w = null; }
+    try { Menu.buildFromTemplate(it).popup(w ? { window: w } : {}); } catch (e) {}
+  });
+}
 function trayMenu() {
   const auto = app.getLoginItemSettings().openAtLogin;
   return Menu.buildFromTemplate([
@@ -316,7 +372,16 @@ else {
       const ok = ['notifications', 'clipboard-read', 'clipboard-sanitized-write', 'fullscreen', 'media', 'fileSystem'].includes(permission) && isAppUrl(details && details.requestingUrl);
       cb(ok);
     });
+    /* 1.8.1 — «ما في نسخ بالزرّ اليمين»: Electron لا يرسم قائمةً سياقيّة وحده، وقائمة التطبيق كانت بلا «تحرير» —
+       فلا قائمة عند الزرّ اليمين، وعلى الماك لا نسخ ولا لصق بالاختصار أصلاً. الآن قائمةٌ بحسب ما تحت المؤشّر في كلّ نافذة
+       (النصّ المحدَّد · الحقل · الرابط · الصورة · اقتراح الإملاء)، و«تحرير» بأدوار النظام نفسها. */
+    app.on('web-contents-created', (_e, wc) => { try { wireContextMenu(wc); } catch (e) {} });
     Menu.setApplicationMenu(Menu.buildFromTemplate([
+      { label: 'تحرير', submenu: [
+        { label: 'تراجع', role: 'undo' }, { label: 'إعادة', role: 'redo' }, { type: 'separator' },
+        { label: 'قصّ', role: 'cut' }, { label: 'نسخ', role: 'copy' }, { label: 'لصق', role: 'paste' },
+        { label: 'لصقٌ بلا تنسيق', role: 'pasteAndMatchStyle' }, { label: 'تحديد الكلّ', role: 'selectAll' },
+      ] },
       { label: 'عرض', submenu: [
         { label: 'إعادة تحميل', accelerator: 'CmdOrCtrl+R', click: () => win && win.webContents.reload() },
         { label: 'تكبير', accelerator: 'CmdOrCtrl+=', click: () => win && win.webContents.setZoomFactor(Math.min(2, win.webContents.getZoomFactor() + 0.1)) },
@@ -880,7 +945,7 @@ ipcMain.handle('tf-agent-scan', async (ev) => {
 });
 
 ipcMain.handle('tf-desk-caps', (ev) => fromApp(ev)
-  ? { v: '1.8.0', llm: true, vision: true, comfy: true, asr: asrReady(), sys: true, agentTest: true, oldDir: true, dayStart: true, auto: !!MEDIA.root && PATH_OK.test(MEDIA.root), avid: !!MEDIA.avidWatch && PATH_OK.test(MEDIA.avidWatch), paths: !!CFG.openPaths, version: app.getVersion(), updates: UPD.configured, agent: !CFG.agentPaused, agentOn: AGENT.on, devtools: DEVTOOLS, safePaths: true }
+  ? { v: '1.9.0', pin: true, comfyNet: true, comfyInfo: true, asrModels: true, ctx: true, llm: true, vision: true, comfy: true, asr: asrReady(), sys: true, agentTest: true, oldDir: true, dayStart: true, auto: !!MEDIA.root && PATH_OK.test(MEDIA.root), avid: !!MEDIA.avidWatch && PATH_OK.test(MEDIA.avidWatch), paths: !!CFG.openPaths, version: app.getVersion(), updates: UPD.configured, agent: !CFG.agentPaused, agentOn: AGENT.on, devtools: DEVTOOLS, safePaths: true }
   : {});
 
 /* ═══ 1.2.1 — الطباعة: PDF مباشرٌ إلى «التنزيلات» بلا نافذةٍ منبثقة ═══
@@ -1207,7 +1272,61 @@ ipcMain.handle('tf-llm', async (ev, o) => {
    ← POST /prompt ← /history/<المعرّف> كلّ ثانية حتّى تظهر صورة ← /view. الصورة الأولى من المخرجات (PNG أو JPEG · ٤٠ م.ب على الأكثر،
    وتُعرف من بايتاتها لا من اسمها) تعود بايتاتٍ للصفحة. واحدٌ في كلّ مرّة، وبمهلةٍ عشر دقائق على الأكثر. لا نصّ خطأٍ خام إلى الصفحة. */
 const COMFY = { base: 'http://127.0.0.1:8188', busy: false, pollMs: 1000 };
-(() => { try { const u = new URL(String((CFG.comfy && CFG.comfy.url) || '')); if (u.protocol === 'http:' && /^(127\.0\.0\.1|localhost|\[::1\])$/i.test(u.hostname)) COMFY.base = u.origin; } catch (e) {} })();
+/* 1.9.0 — ComfyUI على الشبكة الداخليّة: جهازٌ قويّ في المحطّة يخدم الأجهزة كلّها. العنوان http وحده وبرقم IP خاصّ
+   (10.x · 172.16–31.x · 192.168.x) أو هذا الجهاز — لا اسم نطاق (لا يُعاد توجيهه إلى الخارج) ولا عنوان عامّ ولا مسار */
+function comfyOrigin(v) {
+  try {
+    const u = new URL(String(v || '').trim());
+    if (u.protocol !== 'http:' || u.username || u.password || (u.pathname && u.pathname !== '/') || u.search || u.hash) return '';
+    const h = u.hostname.toLowerCase();
+    if (/^(127\.0\.0\.1|localhost|\[::1\])$/.test(h)) return u.origin;
+    const m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(h);
+    if (!m || m.slice(1).some((x) => Number(x) > 255)) return '';
+    const a = Number(m[1]), b = Number(m[2]);
+    return (a === 10 || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168)) ? u.origin : '';
+  } catch (e) { return ''; }
+}
+(() => { const o = comfyOrigin(CFG.comfy && CFG.comfy.url); if (o) COMFY.base = o; })();
+const comfyLocal = () => /^http:\/\/(127\.0\.0\.1|localhost|\[::1\])(:|$)/.test(COMFY.base);
+/* العنوان من الصفحة: يُقبل بعد موافقة صاحب الجهاز في نافذة النظام — ويُحفظ في config.json كما يحفظ whisper اختياره */
+async function comfySetUrl(v) {
+  const raw = String(v || '').trim(), reset = !raw;
+  const o = reset ? 'http://127.0.0.1:8188' : comfyOrigin(raw.replace(/\/+$/, ''));
+  if (!o) return { ok: false, error: 'bad_url' };
+  if (o === COMFY.base) return { ok: true, url: o, same: true };
+  const r = await dialog.showMessageBox(win && !win.isDestroyed() ? win : undefined, { type: 'question', buttons: ['اسمح', 'ألغِ'], defaultId: 1, cancelId: 1, noLink: true,
+    title: 'ComfyUI', message: reset ? 'إعادة ComfyUI إلى هذا الجهاز؟' : 'السماح لـTakeFlow بالاتّصال بـComfyUI على ' + o + '؟',
+    detail: reset ? 'العنوان: http://127.0.0.1:8188' : 'جهازٌ على الشبكة الداخليّة للمحطّة. يُرسَل إليه سير العمل والوصف وتعود منه الصورة — ولا شيء آخر.' });
+  if (!r || r.response !== 0) return { ok: false, error: 'cancelled' };
+  try {
+    const f = path.join(app.getPath('userData'), 'config.json');
+    let cur = {};
+    try { cur = JSON.parse(fs.readFileSync(f, 'utf8')); } catch (e) { cur = Object.assign({}, CFG); }
+    cur.comfy = Object.assign({}, cur.comfy || {}, { url: o });
+    fs.writeFileSync(f, JSON.stringify(cur, null, 2));
+  } catch (e) { return { ok: false, error: 'failed' }; }
+  CFG.comfy = Object.assign({}, CFG.comfy || {}, { url: o });
+  COMFY.base = o;
+  return { ok: true, url: o };
+}
+/* /object_info — أسماء العقد المثبّتة وملفّات النماذج في محمّلاتها (للفحص قبل التوليد) — لا شيء آخر يصل الصفحة */
+const COMFY_FILES = { ckpt: [['CheckpointLoaderSimple', 'ckpt_name']], unet: [['UNETLoader', 'unet_name']], vae: [['VAELoader', 'vae_name']],
+  clip: [['CLIPLoader', 'clip_name'], ['DualCLIPLoader', 'clip_name1']], lora: [['LoraLoader', 'lora_name']] };
+function comfyInfoOf(j) {
+  const NAME = /^[\w .+-]{1,120}$/, FILE = /^[^\u0000-\u001f<>"|?*]{1,200}$/;
+  const classes = Object.keys(j && typeof j === 'object' ? j : {}).filter((k) => NAME.test(k)).slice(0, 6000);
+  const files = {};
+  for (const [k, L] of Object.entries(COMFY_FILES)) {
+    const set = new Set();
+    for (const [node, inp] of L) {
+      const req = j && j[node] && j[node].input && j[node].input.required, v = req && req[inp];
+      const list = Array.isArray(v) && Array.isArray(v[0]) ? v[0] : [];
+      list.forEach((x) => { if (typeof x === 'string' && FILE.test(x)) set.add(x); });
+    }
+    files[k] = [...set].slice(0, 500);
+  }
+  return { classes, files };
+}
 const COMFY_MAX_WF = 512 * 1024, COMFY_MAX_IMG = 40 * 1024 * 1024;
 async function comfyFetch(p, o, ms) {
   const ctl = new AbortController(), t = setTimeout(() => ctl.abort(), ms || 5000);
@@ -1226,12 +1345,24 @@ ipcMain.handle('tf-comfy', async (ev, o) => {
   const op = String((o && o.op) || '');
   try {
     if (op === 'status') {
+      const at = { url: COMFY.base, local: comfyLocal() };   /* 1.9.0 — أين يعمل (أو أين لا يعمل) */
       let r;
-      try { r = await comfyFetch('/system_stats', {}, 2500); } catch (e) { return { ok: true, on: false, why: llmErr(e) }; }
-      if (!r.ok) return { ok: true, on: false, why: 'failed' };
+      try { r = await comfyFetch('/system_stats', {}, 2500); } catch (e) { return Object.assign({ ok: true, on: false, why: llmErr(e) }, at); }
+      if (!r.ok) return Object.assign({ ok: true, on: false, why: 'failed' }, at);
       const j = await r.json().catch(() => ({}));
       const d = Array.isArray(j.devices) && j.devices[0] ? j.devices[0] : {};
-      return { ok: true, on: true, version: String((j.system && (j.system.comfyui_version || '')) || '').slice(0, 30), gpu: String(d.name || '').slice(0, 80), vram: Number(d.vram_total) || 0, busy: COMFY.busy };
+      return Object.assign({ ok: true, on: true, version: String((j.system && (j.system.comfyui_version || '')) || '').slice(0, 30), gpu: String(d.name || '').slice(0, 80), vram: Number(d.vram_total) || 0, busy: COMFY.busy }, at);
+    }
+    if (op === 'url') return await comfySetUrl(o && o.url);   /* 1.9.0 */
+    if (op === 'where') return { ok: true, url: COMFY.base, local: comfyLocal() };
+    if (op === 'info') {
+      let r;
+      try { r = await comfyFetch('/object_info', {}, 20000); } catch (e) { return { ok: true, on: false, why: llmErr(e) }; }
+      if (!r.ok) return { ok: true, on: false, why: 'failed' };
+      if (Number(r.headers.get('content-length')) > 60 * 1048576) return { ok: false, error: 'failed' };
+      const j = await r.json().catch(() => null);
+      if (!j || typeof j !== 'object') return { ok: false, error: 'failed' };
+      return Object.assign({ ok: true, on: true }, comfyInfoOf(j));
     }
     if (op === 'run') {
       const wf = o && o.workflow;
@@ -1304,9 +1435,39 @@ async function asrPick(kind) {
 }
 ipcMain.handle('tf-asr-pick', async (ev, k) => (fromApp(ev) && (k === 'bin' || k === 'model')) ? Object.assign(asrState(), { picked: await asrPick(k) }) : { ok: false, error: 'origin' });
 const ASR_MAX = 200 * 1048576;
+/* 1.9.0 — نماذج whisper.cpp في مجلّد النموذج المختار (ggml-*.bin · *.gguf): تُعرض بأسمائها وأحجامها، والتبديل من المجلّد نفسه وحده —
+   الصفحة تعطي اسماً من القائمة لا مساراً */
+const ASR_MODEL_RE = /^[\w .()+-]{1,120}\.(bin|gguf)$/i;
+function asrModels() {
+  if (!asrFile(ASR.model)) return { ok: true, dir: '', models: [] };
+  const dir = path.dirname(ASR.model);
+  let names = [];
+  try { names = fs.readdirSync(dir).filter((n) => ASR_MODEL_RE.test(n) && /ggml|whisper|\.gguf$/i.test(n)).slice(0, 40); } catch (e) { names = []; }
+  const models = names.map((n) => { let size = 0; try { size = fs.statSync(path.join(dir, n)).size; } catch (e) {} return { name: n, size, cur: path.join(dir, n) === ASR.model }; })
+    .filter((m) => m.size > 1048576);
+  return { ok: true, dir: path.basename(dir), models };
+}
+function asrUse(name) {
+  const n = String(name || '');
+  const L = asrModels().models;
+  if (!ASR_MODEL_RE.test(n) || !L.some((m) => m.name === n)) return { ok: false, error: 'bad_model' };
+  const v = path.join(path.dirname(ASR.model), n);
+  if (!asrFile(v)) return { ok: false, error: 'bad_model' };
+  ASR.model = v;
+  try {
+    const f = path.join(app.getPath('userData'), 'config.json');
+    let cur = {};
+    try { cur = JSON.parse(fs.readFileSync(f, 'utf8')); } catch (e) { cur = Object.assign({}, CFG); }
+    cur.whisper = Object.assign({}, cur.whisper || {}, { model: v });
+    fs.writeFileSync(f, JSON.stringify(cur, null, 2));
+  } catch (e) { return { ok: false, error: 'failed' }; }
+  return Object.assign(asrState(), { used: n });
+}
 ipcMain.handle('tf-asr', async (ev, o) => {
   if (!fromApp(ev)) return { ok: false, error: 'origin' };
   if (String((o && o.op) || '') === 'state') return asrState();
+  if (String((o && o.op) || '') === 'models') return asrModels();   /* 1.9.0 */
+  if (String((o && o.op) || '') === 'use') return ASR.busy ? { ok: false, error: 'busy' } : asrUse(o && o.name);
   if (!asrReady()) return { ok: false, error: 'not_set' };
   if (ASR.busy) return { ok: false, error: 'busy' };
   const b = o && o.bytes;
