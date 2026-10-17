@@ -55,7 +55,7 @@
    وفتح المسارات مقيّدٌ بشكل مسارٍ محلّيّ/شبكيّ لا رابط. وكلّ قنوات 1.2 من صفحة المحطة وحدها،
    والمعاينة برمزٍ عشوائيّ يصدره الغلاف لملفٍّ بعينه — لا مسار في الرابط.
    ═══════════════════════════════════════════════════════════════════ */
-const { app, BrowserWindow, shell, ipcMain, Menu, session, dialog, Tray, nativeImage, Notification, protocol } = require('electron');
+const { app, BrowserWindow, shell, ipcMain, Menu, session, dialog, Tray, nativeImage, Notification, protocol, powerSaveBlocker } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
@@ -107,6 +107,11 @@ const POPUP_OK = [APP_ORIGIN, 'https://accounts.google.com', 'https://login.micr
 
 let win = null, tray = null, quitting = false, lastBadge = 0;
 const START_HIDDEN = process.argv.includes('--hidden');
+/* 1.9.1 (v717) — «شاشة لوحة الهواء»: جهازٌ موصولٌ بتلفزيون غرفة الأخبار أو البثّ أو الإدارة يفتح اللوحة وحدها بملء الشاشة،
+   لا ينطفئ ولا ينام، ويعود وحده بعد انقطاع الشبكة أو تعطّل الصفحة. بالقائمة بجانب الساعة (تُحفظ في إعداد الجهاز) أو --onair */
+const SCREEN = CFG.screen === true || process.argv.includes('--onair');
+let screenBlock = -1;
+function screenUrl() { try { const u = new URL(CFG.url); u.searchParams.set('mode', 'onair'); return u.toString(); } catch (e) { return CFG.url; } }
 const ICON = path.join(__dirname, 'build', 'icon.png');
 /* 1.4 — ويندوز يأخذ ICO بمقاساته (١٦…٢٥٦) فلا تُصغَّر صورةٌ كبيرة في شريط المهامّ وبجانب الساعة */
 const ICON_WIN = path.join(__dirname, 'build', process.platform === 'win32' && fs.existsSync(path.join(__dirname, 'build', 'icon.ico')) ? 'icon.ico' : 'icon.png');
@@ -142,8 +147,8 @@ function createWindow() {
   win = new BrowserWindow(Object.assign({
     width: st.width, height: st.height, x: st.x, y: st.y, minWidth: 1024, minHeight: 680,
     title: 'TakeFlow TV', backgroundColor: '#0a0e1a', autoHideMenuBar: true, show: false,
-    icon: ICON_WIN,
-    webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false, sandbox: true, devTools: DEVTOOLS, spellcheck: true,
+    icon: ICON_WIN, fullscreen: SCREEN,
+    webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false, sandbox: true, devTools: DEVTOOLS, spellcheck: true, backgroundThrottling: !SCREEN,
       additionalArguments: ['--tf-chrome=' + (CHROME ? (process.platform === 'darwin' ? 'mac' : 'wco') : 'off')] },
   }, frame));
   /* 1.4 — الصفحة تبلّغ شريطها بعد كلّ تحميل؛ صفحةٌ أقدم لا تفعل ← شريط سحبٍ بسيط بعد عشر ثوانٍ */
@@ -155,13 +160,14 @@ function createWindow() {
   });
   win.once('ready-to-show', () => {
     if (st.maximized) win.maximize();
-    if (!START_HIDDEN) win.show();
+    if (!START_HIDDEN || SCREEN) win.show();
+    if (SCREEN) { try { win.setFullScreen(true); } catch (e) {} try { if (screenBlock < 0) screenBlock = powerSaveBlocker.start('prevent-display-sleep'); } catch (e) {} }
     if (CFG.zoom && CFG.zoom !== 1) win.webContents.setZoomFactor(Number(CFG.zoom));
   });
   /* الإغلاق يُخفي إلى جانب الساعة — الإشعارات تبقى تصل. الخروج من قائمة الأيقونة أو «خروج» */
   win.on('close', (ev) => {
     saveState();
-    if (!quitting && CFG.closeToTray && tray) {
+    if (!quitting && CFG.closeToTray && tray && !SCREEN) {
       ev.preventDefault(); win.hide();
       if (!app._toldTray) {
         app._toldTray = true;
@@ -201,13 +207,26 @@ function createWindow() {
   /* 1.4.1 — انتقلت المحطّة إلى نطاقها الخاصّ: يُحفظ العنوان الجديد فيفتح التطبيق عليه في المرّة التالية */
   win.webContents.on('did-navigate', (ev, url) => { try { rememberAppUrl(url); } catch (e) {} });
   win.on('closed', () => { win = null; });
-  win.loadURL(CFG.url);
+  /* 1.9.1 (v717) — تعطّل الصفحة (نفاد الذاكرة · انهيار) يُعاد تحميلها وحدها — ثلاث مرّاتٍ في خمس دقائق حدٌّ أقصى ثمّ صفحة الخطأ */
+  const crashes = [];
+  win.webContents.on('render-process-gone', (ev, d) => {
+    if (!d || d.reason === 'clean-exit' || quitting) return;
+    const now = Date.now(); while (crashes.length && now - crashes[0] > 300000) crashes.shift(); crashes.push(now);
+    console.error('render-process-gone', d.reason, d.exitCode);
+    if (crashes.length > 3) return;
+    setTimeout(() => { try { if (win && !win.isDestroyed()) win.loadURL(SCREEN ? screenUrl() : CFG.url); } catch (e) {} }, 1500);
+  });
+  /* الصفحة لا تستجيب عشرين ثانية: تُعاد (اللوحة على الشاشة لا أحد يضغط عليها) — وتُلغى إن عادت تستجيب */
+  let hang = null;
+  win.on('unresponsive', () => { clearTimeout(hang); hang = setTimeout(() => { try { if (win && !win.isDestroyed()) win.webContents.reload(); } catch (e) {} }, SCREEN ? 20000 : 60000); });
+  win.on('responsive', () => { clearTimeout(hang); hang = null; });
+  win.loadURL(SCREEN ? screenUrl() : CFG.url);
   /* لا شبكة عند التشغيل: صفحةٌ تقول ذلك وتعيد المحاولة */
   win.webContents.on('did-fail-load', (ev, code, desc, url, isMain) => {
     if (!isMain || code === -3) return;
     win.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(`<!doctype html><html dir="rtl" lang="ar"><meta charset="utf-8"><body style="font-family:system-ui;background:#0a0e1a;color:#eee;display:grid;place-items:center;height:100vh;margin:0">
       <div style="text-align:center;line-height:2"><b style="font-size:20px">تعذّر الوصول إلى الخادم</b><br>${desc || ''} (${code})<br><span style="opacity:.75">${CFG.url}</span><br><br>
-      <button onclick="location.href='${CFG.url}'" style="font:inherit;padding:10px 18px;border-radius:10px;border:0;background:#e8a020;color:#1a1305;font-weight:700;cursor:pointer">إعادة المحاولة</button></div></body></html>`));
+      <button onclick="location.href='${SCREEN ? screenUrl() : CFG.url}'" style="font:inherit;padding:10px 18px;border-radius:10px;border:0;background:#e8a020;color:#1a1305;font-weight:700;cursor:pointer">إعادة المحاولة</button></div></body></html><script>/* 1.9.1 (v717) — يعيد المحاولة وحده: حين تعود الشبكة فوراً، وإلّا كلّ عشرين ثانية */(function(){var u=${JSON.stringify(SCREEN ? screenUrl() : CFG.url)};function go(){location.href=u;}addEventListener('online',go);setTimeout(go,20000);})();</script>`));
   });
 }
 
@@ -255,10 +274,25 @@ function trayMenu() {
         tray && tray.setContextMenu(trayMenu());
       } },
     { label: 'افتح مجلّد التنزيلات', click: () => shell.openPath(app.getPath('downloads')) },
+    /* 1.9.1 (v717) — هذا الجهاز شاشة لوحة الهواء: يُحفظ ويُعاد التشغيل عليه */
+    { label: 'شاشة لوحة الهواء (ملء الشاشة · لا ينام)', type: 'checkbox', checked: SCREEN, click: (it) => setScreen(!!it.checked) },
     { label: 'المسارات', submenu: pathsMenu() },   /* 1.2 */
     { type: 'separator' },
     { label: 'خروج', click: () => { quitting = true; app.quit(); } },
   ]);
+}
+function setScreen(on) {
+  try {
+    const f = path.join(app.getPath('userData'), 'config.json');
+    let cur = null;   /* كما rememberAppUrl: إعداد المستخدم، وإلّا إعداد المثبّت — لا تُجمَّد القيم الافتراضيّة فيه */
+    for (const p of [f, path.join(__dirname, 'config.json')]) { if (cur) break; try { if (fs.existsSync(p)) cur = JSON.parse(fs.readFileSync(p, 'utf8')); } catch (e) { cur = null; } }
+    cur = (cur && typeof cur === 'object') ? cur : {};
+    cur.screen = !!on;
+    fs.writeFileSync(f, JSON.stringify(cur, null, 2));
+    if (on) app.setLoginItemSettings({ openAtLogin: true, args: [] });   /* الشاشة تعود وحدها بعد انقطاع الكهرباء */
+  } catch (e) { console.error('setScreen', e.message); return false; }
+  quitting = true; app.relaunch({ args: process.argv.slice(1).filter((a) => a !== '--onair' && a !== '--hidden') }); app.exit(0);
+  return true;
 }
 /* 1.2 — الجذر ومجلّد Avid يُختاران بنافذة النظام ويُحفظان في إعداد المستخدم (userData/config.json) — لا تحرير JSON باليد */
 function pathsMenu() {
@@ -934,19 +968,37 @@ ipcMain.handle('tf-agent-scan', async (ev) => {
     try { names = await within(fs.promises.readdir(dir), 6000); } catch (e) { continue; }   /* مجلّد اليوم لم يُنشأ بعد */
     for (const nm of names.slice().sort()) {
       if (files.length >= AG_SCAN_MAX) break;
-      if (!AG_IMG.test(nm) || /^[.~]/.test(nm)) continue;
+      if (/^[.~]/.test(nm)) continue;
       const f = PX(dir).join(dir, nm);
       let st; try { st = await within(fs.promises.stat(f), 6000); } catch (e) { continue; }
-      if (!st.isFile() || st.size <= 0 || st.size > AG_MAX) continue;
-      files.push({ path: f, file: nm, name: nm.replace(/\.[^.]+$/, ''), seg: sg.id, segName: sg.name, bytes: st.size });
+      if (!st.isFile()) continue;
+      /* 1.9.1 (v715 · تقرير الاستلام) — ما لا يُستلم يُقال بسببه: ليس صورة · فارغ · أكبر من ٨٠ ميغا — وما زال يُنسخ */
+      const skip = !AG_IMG.test(nm) ? 'ext' : st.size <= 0 ? 'empty' : st.size > AG_MAX ? 'big' : '';
+      const sn = AGENT.seen.get(f.toLowerCase());
+      files.push({ path: f, file: nm, name: nm.replace(/\.[^.]+$/, ''), seg: sg.id, segName: sg.name, bytes: st.size, skip, copying: !skip && !!sn && !sn.done });
     }
   }
   return { ok: true, day, on: AGENT.on, files };
 });
-
 ipcMain.handle('tf-desk-caps', (ev) => fromApp(ev)
-  ? { v: '1.9.0', pin: true, comfyNet: true, comfyInfo: true, asrModels: true, ctx: true, llm: true, vision: true, comfy: true, asr: asrReady(), sys: true, agentTest: true, oldDir: true, dayStart: true, auto: !!MEDIA.root && PATH_OK.test(MEDIA.root), avid: !!MEDIA.avidWatch && PATH_OK.test(MEDIA.avidWatch), paths: !!CFG.openPaths, version: app.getVersion(), updates: UPD.configured, agent: !CFG.agentPaused, agentOn: AGENT.on, devtools: DEVTOOLS, safePaths: true }
+  ? { v: '1.9.1', pin: true, comfyNet: true, comfyInfo: true, asrModels: true, ctx: true, llm: true, vision: true, comfy: true, asr: asrReady(), sys: true, agentTest: true, oldDir: true, dayStart: true, auto: !!MEDIA.root && PATH_OK.test(MEDIA.root), avid: !!MEDIA.avidWatch && PATH_OK.test(MEDIA.avidWatch), paths: !!CFG.openPaths, version: app.getVersion(), updates: UPD.configured, agent: !CFG.agentPaused, agentOn: AGENT.on, devtools: DEVTOOLS, safePaths: true, screen: SCREEN }
   : {});
+/* 1.9.1 (v715) — «أعد التسمية» من تقرير الاستلام: في المجلّد نفسه وحده داخل جذر المصدر · اسمٌ آمن بلا مسار ولا امتدادٍ آخر ·
+   لا يكتب فوق ملفٍّ موجود. الوكيل يرى الاسم الجديد في دورته التالية فيستلمه بقاعدته. */
+ipcMain.handle('tf-agent-rename', async (ev, p, to) => {
+  if (!fromApp(ev)) return { ok: false, error: 'origin' };
+  const c = AGENT.cfg; if (!c || !c.src) return { ok: false, error: 'no_config' };
+  const from = String(p || ''), nm = String(to || '').trim();
+  if (!PATH_OK.test(from) || !agInside(c.src, from) || !AG_IMG.test(from)) return { ok: false, error: 'bad_path' };
+  if (!nm || nm.length > 120 || /[\\/:*?"<>|\x00-\x1f]/.test(nm) || /^[.~ ]/.test(nm) || /[. ]$/.test(nm)) return { ok: false, error: 'bad_name' };
+  const X = PX(from), dir = X.dirname(from), ext = X.extname(from), dest = X.join(dir, nm + ext);
+  if (!agInside(c.src, dest) || X.dirname(dest) !== dir) return { ok: false, error: 'bad_path' };
+  let taken = true; try { await within(fs.promises.access(dest), 4000); } catch (e) { taken = !(e && e.code === 'ENOENT'); }   /* مهلةٌ أو خطأٌ آخر: لا نخاطر بالكتابة فوقه */
+  if (taken) return { ok: false, error: 'exists' };
+  try { await within(fs.promises.rename(from, dest), 8000); return { ok: true, path: dest, file: nm + ext }; }
+  catch (e) { return { ok: false, error: e && e.code === 'ENOENT' ? 'not_found' : 'failed' }; }
+});
+
 
 /* ═══ 1.2.1 — الطباعة: PDF مباشرٌ إلى «التنزيلات» بلا نافذةٍ منبثقة ═══
    كان البرنامج يفتح about:blank ليطبع، والغلاف يبعث كلّ نافذةٍ غريبةٍ إلى النظام فيقول ويندوز
@@ -1496,11 +1548,32 @@ ipcMain.handle('tf-asr', async (ev, o) => {
   finally { ASR.busy = false; if (dir) { try { fs.rmSync(dir, { recursive: true, force: true }); } catch (e) {} } }
 });
 
-/* الجهاز: الذاكرة الكلّيّة والحرّة · المعالج · المساحة الحرّة حيث تُحفظ النماذج (مجلّد المستخدم) */
+/* 1.9.1 (v714) — ذاكرة الكرت لاختيار النموذج حسبها (tf-pc.js · «حسب ذاكرة الكرت»): nvidia-smi إن وُجد — مرّةً في الجلسة،
+   بمهلة ثلاث ثوانٍ، بلا shell ولا وسيطٍ من الصفحة. لا كرت NVIDIA (ماك · AMD · Intel): null والصفحة تسأل صاحب الجهاز. */
+let GPU_INFO;
+function gpuInfo() {
+  if (GPU_INFO !== undefined) return Promise.resolve(GPU_INFO);
+  return new Promise(res => {
+    let out = '', done = false;
+    const end = v => { if (done) return; done = true; GPU_INFO = v; res(v); };
+    let p;
+    try { p = spawn('nvidia-smi', ['--query-gpu=name,memory.total', '--format=csv,noheader,nounits'], { windowsHide: true }); } catch (e) { return end(null); }
+    const t = setTimeout(() => { try { p.kill(); } catch (e) {} end(null); }, 3000);
+    p.stdout.on('data', d => { out += String(d); if (out.length > 4096) out = out.slice(0, 4096); });
+    p.on('error', () => { clearTimeout(t); end(null); });
+    p.on('close', () => {
+      clearTimeout(t);
+      const m = /^\s*([^,\n]{1,80}),\s*(\d{3,7})\s*$/m.exec(out);
+      end(m ? { name: m[1].trim(), vram: Number(m[2]) * 1048576 } : null);
+    });
+  });
+}
+/* الجهاز: الذاكرة الكلّيّة والحرّة · المعالج · المساحة الحرّة حيث تُحفظ النماذج (مجلّد المستخدم) · وذاكرة الكرت (1.9.1) */
 ipcMain.handle('tf-sys', async (ev) => {
   if (!fromApp(ev)) return { ok: false, error: 'origin' };
   const os = require('os');
   let disk = 0;
   try { const s = await fs.promises.statfs(os.homedir()); disk = Number(s.bavail) * Number(s.bsize); } catch (e) { disk = 0; }
-  return { ok: true, mem: os.totalmem(), free: os.freemem(), cpus: (os.cpus() || []).length, disk, platform: process.platform };
+  const gpu = await gpuInfo().catch(() => null);
+  return { ok: true, mem: os.totalmem(), free: os.freemem(), cpus: (os.cpus() || []).length, disk, platform: process.platform, gpu };
 });

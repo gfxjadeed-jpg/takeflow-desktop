@@ -52,6 +52,7 @@ contextBridge.exposeInMainWorld('tfDesktop', {
   agentWrite: (o) => ipcRenderer.invoke('tf-agent-write', { dir: String((o && o.dir) || ''), name: String((o && o.name) || ''), bytes: o && o.bytes }),   /* 1.3.1 — إلى الوجهات وحدها */
   agentPick: () => ipcRenderer.invoke('tf-agent-pick'),
   agentScan: () => ipcRenderer.invoke('tf-agent-scan'),
+  agentRename: (p, to) => ipcRenderer.invoke('tf-agent-rename', String(p || ''), String(to || '')),   /* 1.9.1 — الاسم المقترح من تقرير الاستلام */
   agentTest: () => ipcRenderer.invoke('tf-agent-test'),   /* 1.5.0 — «اختبر»: المصدر ومجلّدات اليوم والوجهات من هذا الجهاز */   /* 1.3.2 — أسماء صور اليوم في مجلّدات المشاهد (قراءة وحدها) */
   /* 1.6.0 — جهاز المحطّة: الذكاء المحلّيّ (Ollama) · التفريغ (whisper.cpp) · الجهاز */
   llm: (o) => ipcRenderer.invoke('tf-llm', { op: String((o && o.op) || ''), model: String((o && o.model) || ''), prompt: String((o && o.prompt) || ''), system: String((o && o.system) || ''), temp: Number(o && o.temp),
