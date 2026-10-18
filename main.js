@@ -51,6 +51,8 @@
        بعد موافقة صاحب الجهاز في نافذة النظام نفسها — الصفحة تقترح ولا تقرّر · /object_info: العقد والنماذج المثبّتة
        (فحص القوالب قبل التوليد)
      • نماذج whisper.cpp في مجلّد النموذج المختار — يُبدَّل بينها بلا نافذة ملفّات (من المجلّد نفسه وحده)
+   الغلاف 1.9.3 (v742) — مجلّد الجرافيك على الشاشة: صوره ومقاطعه بمعايناتها (tf-fs-list) والسحب منه إلى Avid
+     أو أيّ برنامج (tf-drag-out · startDrag) — لما عُرض للصفحة وحده
    الأمان: contextIsolation، لا nodeIntegration، الروابط الخارجيّة في المتصفّح،
    وفتح المسارات مقيّدٌ بشكل مسارٍ محلّيّ/شبكيّ لا رابط. وكلّ قنوات 1.2 من صفحة المحطة وحدها،
    والمعاينة برمزٍ عشوائيّ يصدره الغلاف لملفٍّ بعينه — لا مسار في الرابط.
@@ -1014,7 +1016,7 @@ ipcMain.handle('tf-agent-scan', async (ev) => {
   return { ok: true, day, on: AGENT.on, files };
 });
 ipcMain.handle('tf-desk-caps', (ev) => fromApp(ev)
-  ? { v: '1.9.2', pin: true, comfyNet: true, comfyInfo: true, asrModels: true, ctx: true, llm: true, vision: true, comfy: true, asr: asrReady(), sys: true, agentTest: true, oldDir: true, dayStart: true, auto: !!MEDIA.root && PATH_OK.test(MEDIA.root), avid: !!MEDIA.avidWatch && PATH_OK.test(MEDIA.avidWatch), paths: !!CFG.openPaths, version: app.getVersion(), updates: UPD.configured, agent: !CFG.agentPaused, agentOn: AGENT.on, devtools: DEVTOOLS, safePaths: true, screen: SCREEN, pullPause: true, cred: credCan() }
+  ? { v: '1.9.3', pin: true, comfyNet: true, comfyInfo: true, asrModels: true, ctx: true, llm: true, vision: true, comfy: true, asr: asrReady(), sys: true, agentTest: true, oldDir: true, dayStart: true, auto: !!MEDIA.root && PATH_OK.test(MEDIA.root), avid: !!MEDIA.avidWatch && PATH_OK.test(MEDIA.avidWatch), paths: !!CFG.openPaths, version: app.getVersion(), updates: UPD.configured, agent: !CFG.agentPaused, agentOn: AGENT.on, devtools: DEVTOOLS, safePaths: true, screen: SCREEN, pullPause: true, cred: credCan(), gallery: true, dragOut: true }
   : {});
 /* 1.9.1 (v715) — «أعد التسمية» من تقرير الاستلام: في المجلّد نفسه وحده داخل جذر المصدر · اسمٌ آمن بلا مسار ولا امتدادٍ آخر ·
    لا يكتب فوق ملفٍّ موجود. الوكيل يرى الاسم الجديد في دورته التالية فيستلمه بقاعدته. */
@@ -1252,6 +1254,62 @@ ipcMain.handle('tf-avid-send', async (ev, o) => {
     try { await fs.promises.unlink(tmp); } catch (e2) {}
     return { ok: false, error: e && e.code === 'ESIZE' ? 'size_mismatch' : errOf(e) };
   }
+});
+
+/* ═══ الغلاف 1.9.3 (v742) — مجلّد الجرافيك على الشاشة والسحب إلى Avid ═══
+   محمد: «فولدر الجرافيك يبيّن بالبرنامج وتسحب منه على Avid» (القرار: المعاينة والسحب الآن · إضافة Avid نفسها بحثٌ لاحق).
+   · tf-fs-list: ملفّات الصور والفيديو والصوت في المجلّد (أو مجلّد الملفّ) — حتّى ٢٠٠ الأحدث أوّلاً، بمهلة، بلا مجلّداتٍ فرعيّة؛
+     ولكلّ صورةٍ يقرؤها المتصفّح رمزُ معاينة (tfmedia:// كالمعاينة — لا مسار في الرابط)
+   · tf-drag-out: السحب من البرنامج إلى Avid أو أيّ برنامج (webContents.startDrag) — لملفٍّ أعادته tf-fs-list في الساعتين
+     الأخيرتين وحده: الصفحة لا تسحب ما لم يُعرض لها، ولا يُقرأ القرص لحظة السحب (مسار شبكةٍ بطيء لا يعلّق النافذة) */
+const GAL_IMG = ['tif', 'tiff', 'psd', 'tga', 'bmp', 'exr', 'dpx', 'svg', 'ai', 'eps', 'pct', 'pict'], GAL_AUD = ['aif', 'aiff'];
+const isGal = (p) => isMedia(p) || GAL_IMG.includes(extOf(p)) || GAL_AUD.includes(extOf(p));
+const DRAG_OK = new Map(), THUMBS = new Map();
+function thumbFor(file, mime) {
+  const t = THUMBS.get(file), e = t && TOKENS.get(t.split('/').pop());
+  if (e && e.exp > Date.now() + 600e3) return t;
+  const u = tokenFor(file, mime); THUMBS.set(file, u);
+  while (THUMBS.size > 1000) THUMBS.delete(THUMBS.keys().next().value);
+  return u;
+}
+ipcMain.handle('tf-fs-list', async (ev, p) => {
+  if (!fromApp(ev)) return { ok: false, error: 'origin' };
+  const v = String(p || '').trim();
+  if (!PATH_OK.test(v)) return { ok: false, error: 'bad_path' };
+  let st, dir = v;
+  try { st = await within(fs.promises.stat(v), 6000); } catch (e) { return { ok: false, error: errOf(e) }; }
+  if (!st.isDirectory()) dir = PX(v).dirname(v);
+  let names;
+  try { names = (await within(fs.promises.readdir(dir), 6000)).filter((n) => !/^[.~]|\.(tmp|part|partial|crdownload|tfpart)$/i.test(n) && isGal(n)); }
+  catch (e) { return { ok: false, error: errOf(e) }; }
+  const out = [];
+  for (const n of names.slice(0, 400)) {
+    const f = PX(dir).join(dir, n);
+    try { const s = await within(fs.promises.stat(f), 3000); if (s.isFile()) out.push({ f, n, size: s.size, mt: s.mtimeMs }); } catch (e) {}
+  }
+  out.sort((a, b) => b.mt - a.mt);
+  const now = Date.now();
+  for (const [k, d] of DRAG_OK) if (d.exp < now) DRAG_OK.delete(k);
+  const files = out.slice(0, 200).map((o) => {
+    const x = extOf(o.n), mime = PLAY_EXT[x] || '';
+    DRAG_OK.set(o.f, { exp: now + 2 * 3600e3, size: o.size });
+    const kind = (/^image\//.test(mime) || GAL_IMG.includes(x)) ? 'image' : (/^audio\//.test(mime) || GAL_AUD.includes(x)) ? 'audio' : 'video';
+    return { name: o.n, path: o.f, size: o.size, mtime: new Date(o.mt).toISOString(), kind, ext: x, thumb: /^image\//.test(mime) && o.size <= 40 * 1048576 ? thumbFor(o.f, mime) : '' };
+  });
+  while (DRAG_OK.size > 2000) DRAG_OK.delete(DRAG_OK.keys().next().value);
+  return { ok: true, dir, files, more: out.length > 200 };
+});
+ipcMain.on('tf-drag-out', (ev, p) => {
+  if (!fromApp(ev)) return;
+  const v = String(p || '').trim(), d = DRAG_OK.get(v);
+  if (!d || d.exp < Date.now() || !PATH_OK.test(v)) return;
+  let icon = null;
+  try {
+    const mime = PLAY_EXT[extOf(v)] || '';
+    if (/^image\//.test(mime) && d.size <= 8 * 1048576) { const t = nativeImage.createFromPath(v); if (t && !t.isEmpty()) icon = t.resize({ width: 96 }); }
+  } catch (e) {}
+  if (!icon) { try { const a = nativeImage.createFromPath(ICON); if (a && !a.isEmpty()) icon = a.resize({ width: 64 }); } catch (e) {} }
+  try { if (icon) ev.sender.startDrag({ file: v, icon }); } catch (e) {}
 });
 
 /* ═══════════════════════════════════════════════════════════════════
