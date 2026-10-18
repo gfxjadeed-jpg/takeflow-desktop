@@ -19,7 +19,8 @@
    الغلاف 1.7.0: llm({…, images}) صورٌ للرؤية (base64 — ثلاثٌ على الأكثر) · vision: true (الصفحة تعرف أنّ الغلاف يحملها)
    الغلاف 1.8.0: comfy({op:'status'|'run', workflow, timeoutMs}) ComfyUI على الجهاز — سير عملٍ بصيغة API وصورةٌ تعود بايتات
    الغلاف 1.9.0: comfy({op:'info'}) العقد والنماذج المثبّتة · comfy({op:'url', url}) عنوانٌ على الشبكة الداخليّة بموافقة صاحب الجهاز ·
-     comfy({op:'where'}) · asr({op:'models'}) و asr({op:'use', name}) نماذج whisper في مجلّد النموذج · نافذة «النصّ فوق البرامج» (tf-text-pin) */
+     comfy({op:'where'}) · asr({op:'models'}) و asr({op:'use', name}) نماذج whisper في مجلّد النموذج · نافذة «النصّ فوق البرامج» (tf-text-pin)
+   الغلاف 1.9.2 (v735): cred({op:'can'|'get'|'set'|'clear', u, p}) — الاسم وكلمة المرور مشفّرَين بمفتاح النظام لنطاق المحطّة وحده */
 const { contextBridge, ipcRenderer } = require('electron');
 /* يصل من main.js (additionalArguments) — قراءةٌ متزامنة قبل أن تُرسم الصفحة، فلا يومض الإطار */
 const CHROME = (() => { const a = (process.argv || []).find(x => /^--tf-chrome=/.test(String(x))); const v = a ? String(a).split('=')[1] : ''; return v === 'wco' || v === 'mac' ? v : ''; })();
@@ -62,6 +63,7 @@ contextBridge.exposeInMainWorld('tfDesktop', {
   asr: (o) => ipcRenderer.invoke('tf-asr', { op: String((o && o.op) || ''), lang: String((o && o.lang) || ''), bytes: o && o.bytes, name: String((o && o.name) || '').slice(0, 140) }),   /* 1.9.0 name */
   asrPick: (k) => ipcRenderer.invoke('tf-asr-pick', String(k || '')),
   sys: () => ipcRenderer.invoke('tf-sys'),
+  cred: (o) => ipcRenderer.invoke('tf-cred', { op: String((o && o.op) || ''), u: String((o && o.u) || '').slice(0, 64), p: String((o && o.p) || '').slice(0, 256) }),   /* 1.9.2 (v735) — تذكّر الدخول مشفّراً بمفتاح النظام */
   on: (ch, cb) => {
     if (!['tf-fs-arrived', 'tf-media-progress', 'tf-media-ready', 'tf-media-failed', 'tf-avid-progress', 'tf-update-state', 'tf-agent-file', 'tf-llm-pull'].includes(ch) || typeof cb !== 'function') return false;
     ipcRenderer.on(ch, (e, d) => cb(d));

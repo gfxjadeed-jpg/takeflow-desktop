@@ -55,7 +55,7 @@
    وفتح المسارات مقيّدٌ بشكل مسارٍ محلّيّ/شبكيّ لا رابط. وكلّ قنوات 1.2 من صفحة المحطة وحدها،
    والمعاينة برمزٍ عشوائيّ يصدره الغلاف لملفٍّ بعينه — لا مسار في الرابط.
    ═══════════════════════════════════════════════════════════════════ */
-const { app, BrowserWindow, shell, ipcMain, Menu, session, dialog, Tray, nativeImage, Notification, protocol, powerSaveBlocker } = require('electron');
+const { app, BrowserWindow, shell, ipcMain, Menu, session, dialog, Tray, nativeImage, Notification, protocol, powerSaveBlocker, safeStorage } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
@@ -664,6 +664,39 @@ ipcMain.handle('tf-desktop-info', (ev) => fromApp(ev) ? ({ version: app.getVersi
 /* الغلاف 1.1 — من صفحة المحطة وحدها */
 const fromApp = (ev) => !!(ev.senderFrame && isAppUrl(ev.senderFrame.url));   /* 1.4.1 — الأصل كاملاً لا بادئته */
 ipcMain.on('tf-badge', (ev, n) => { if (fromApp(ev)) setBadge(n); });
+/* 1.9.2 (v735) — «تذكّر الاسم وكلمة المرور على هذا الجهاز»: مشفّرَين بمفتاح نظام التشغيل (safeStorage: DPAPI في ويندوز ·
+   سلسلة المفاتيح في ماك · خزنة سطح المكتب في لينكس) في userData/tf-cred.bin، مربوطَين بنطاق المحطّة الذي حُفظا منه.
+   لا تخزين بلا تشفير النظام (لينكس بلا خزنة: basic_text ← لا يُعرض الخيار). الصفحة تطلب وتمسح، ولا تقرأ لغير نطاقها. */
+const CRED_FILE = () => path.join(app.getPath('userData'), 'tf-cred.bin');
+function credCan() {
+  try {
+    if (!safeStorage.isEncryptionAvailable()) return false;
+    if (process.platform === 'linux' && typeof safeStorage.getSelectedStorageBackend === 'function' && safeStorage.getSelectedStorageBackend() === 'basic_text') return false;
+    return true;
+  } catch (e) { return false; }
+}
+function credHost(ev) { try { return new URL(ev.senderFrame.url).host; } catch (e) { return ''; } }
+ipcMain.handle('tf-cred', (ev, o) => {
+  if (!fromApp(ev)) return { ok: false, error: 'origin' };
+  const op = String((o && o.op) || ''), can = credCan(), host = credHost(ev);
+  if (op === 'can') return { ok: true, can };
+  if (op === 'clear') { try { fs.rmSync(CRED_FILE(), { force: true }); } catch (e) {} return { ok: true }; }
+  if (!can || !host) return { ok: false, error: 'no_crypto' };
+  if (op === 'get') {
+    try {
+      if (!fs.existsSync(CRED_FILE())) return { ok: true };
+      const c = JSON.parse(safeStorage.decryptString(fs.readFileSync(CRED_FILE())));
+      return c && c.host === host && c.u && c.p ? { ok: true, u: String(c.u), p: String(c.p) } : { ok: true };
+    } catch (e) { return { ok: true }; }   /* ملفٌّ تالف أو من مستخدم نظامٍ آخر: كأن لا شيء محفوظ */
+  }
+  if (op === 'set') {
+    const u = String((o && o.u) || '').trim().slice(0, 64), p = String((o && o.p) || '').slice(0, 256);
+    if (!u || !p) return { ok: false, error: 'empty' };
+    try { fs.writeFileSync(CRED_FILE(), safeStorage.encryptString(JSON.stringify({ host, u, p, at: Date.now() })), { mode: 0o600 }); return { ok: true }; }
+    catch (e) { return { ok: false, error: 'write' }; }
+  }
+  return { ok: false, error: 'op' };
+});
 ipcMain.on('tf-focus', (ev) => { if (fromApp(ev)) showWin(); });
 
 /* ═══ الغلاف 1.4 (v622) — شريط العنوان من الصفحة ═══
@@ -981,7 +1014,7 @@ ipcMain.handle('tf-agent-scan', async (ev) => {
   return { ok: true, day, on: AGENT.on, files };
 });
 ipcMain.handle('tf-desk-caps', (ev) => fromApp(ev)
-  ? { v: '1.9.1', pin: true, comfyNet: true, comfyInfo: true, asrModels: true, ctx: true, llm: true, vision: true, comfy: true, asr: asrReady(), sys: true, agentTest: true, oldDir: true, dayStart: true, auto: !!MEDIA.root && PATH_OK.test(MEDIA.root), avid: !!MEDIA.avidWatch && PATH_OK.test(MEDIA.avidWatch), paths: !!CFG.openPaths, version: app.getVersion(), updates: UPD.configured, agent: !CFG.agentPaused, agentOn: AGENT.on, devtools: DEVTOOLS, safePaths: true, screen: SCREEN }
+  ? { v: '1.9.2', pin: true, comfyNet: true, comfyInfo: true, asrModels: true, ctx: true, llm: true, vision: true, comfy: true, asr: asrReady(), sys: true, agentTest: true, oldDir: true, dayStart: true, auto: !!MEDIA.root && PATH_OK.test(MEDIA.root), avid: !!MEDIA.avidWatch && PATH_OK.test(MEDIA.avidWatch), paths: !!CFG.openPaths, version: app.getVersion(), updates: UPD.configured, agent: !CFG.agentPaused, agentOn: AGENT.on, devtools: DEVTOOLS, safePaths: true, screen: SCREEN, pullPause: true, cred: credCan() }
   : {});
 /* 1.9.1 (v715) — «أعد التسمية» من تقرير الاستلام: في المجلّد نفسه وحده داخل جذر المصدر · اسمٌ آمن بلا مسار ولا امتدادٍ آخر ·
    لا يكتب فوق ملفٍّ موجود. الوكيل يرى الاسم الجديد في دورته التالية فيستلمه بقاعدته. */
@@ -1305,10 +1338,18 @@ ipcMain.handle('tf-llm', async (ev, o) => {
             }
           }
           send(done ? { status: 'success', pct: 100 } : { status: 'error', error: 'failed' });
-        } catch (e) { send({ status: 'error', error: e && (e.code === 'no_model' || e.code === 'failed') ? e.code : llmErr(e) }); }
+        } catch (e) {
+          /* 1.9.2 — «أوقف مؤقّتاً» يقطع التيّار وحده: Ollama يحفظ ما نزل، و«استأنف» (pull ثانيةً) يكمل من حيث توقّف */
+          if (ctl.__paused) send({ status: 'paused' });
+          else send({ status: 'error', error: e && (e.code === 'no_model' || e.code === 'failed') ? e.code : llmErr(e) });
+        }
         finally { LLM.pulls.delete(model); }
       })();
       return { ok: true, started: true };
+    }
+    if (op === 'pause') {   /* 1.9.2 */
+      const c = LLM.pulls.get(model); if (!c) return { ok: false, error: 'not_pulling' };
+      c.__paused = true; c.abort(); return { ok: true };
     }
     if (op === 'del') {
       const r = await llmFetch('/api/delete', Object.assign(llmJSON({ model, name: model }), { method: 'DELETE' }), 15000);
