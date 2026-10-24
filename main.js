@@ -53,6 +53,13 @@
      • نماذج whisper.cpp في مجلّد النموذج المختار — يُبدَّل بينها بلا نافذة ملفّات (من المجلّد نفسه وحده)
    الغلاف 1.9.3 (v742) — مجلّد الجرافيك على الشاشة: صوره ومقاطعه بمعايناتها (tf-fs-list) والسحب منه إلى Avid
      أو أيّ برنامج (tf-drag-out · startDrag) — لما عُرض للصفحة وحده
+   الغلاف 1.9.5 (v751) — نافذة لوحة الهواء من الصفحة: زرّ اللوحة كان يفتحها منبثقةً صغيرة (560×720) تُبطَّأ في الخلف. صارت نافذةً
+     كبيرة تُكبَّر حين تجهز، لا تُبطَّأ، وتمنع الشاشة من النوم ما دامت مفتوحة، وتنتقل داخل المحطّة وحدها — والضغط ثانيةً يعيد المفتوحة
+     إلى الواجهة بدل نافذةٍ ثانية. و«شاشة لوحة الهواء» (1.9.1 · --onair) لجهاز التلفزيون كما هي
+   الغلاف 1.9.6 (v752) — جسر iNews: جهازٌ واحد في المحطّة يقرأ الرن داون من خادم iNews عبر FTP (desktop/inews.js: عميلٌ مدمج
+     بلا تبعيّات · الوضع السلبيّ · قراءةٌ وحدها) كلّ عشر ثوانٍ ويسلّم اللقطة للصفحة (tf-inews-rundown) فتنشرها لباقي الأجهزة.
+     الإعداد في config.json (inews) وكلمة المرور مشفّرةٌ بمفتاح النظام (safeStorage) ولا تُعاد للصفحة أبداً. ما يخرج من الجهاز:
+     أسماء الطوابير والعناوين وأرقام الصفحات وأرقام المادّة وعدد الكلمات — لا جسم القصّة. tf-inews-set · -state · -test · -stop
    الأمان: contextIsolation، لا nodeIntegration، الروابط الخارجيّة في المتصفّح،
    وفتح المسارات مقيّدٌ بشكل مسارٍ محلّيّ/شبكيّ لا رابط. وكلّ قنوات 1.2 من صفحة المحطة وحدها،
    والمعاينة برمزٍ عشوائيّ يصدره الغلاف لملفٍّ بعينه — لا مسار في الرابط.
@@ -114,6 +121,10 @@ const START_HIDDEN = process.argv.includes('--hidden');
 const SCREEN = CFG.screen === true || process.argv.includes('--onair');
 let screenBlock = -1;
 function screenUrl() { try { const u = new URL(CFG.url); u.searchParams.set('mode', 'onair'); return u.toString(); } catch (e) { return CFG.url; } }
+/* 1.9.5 (v751) — نافذة لوحة الهواء من الصفحة (window.open('?mode=onair')): واحدةٌ لكلّ عرض (اللوحة · الجدار view=wall) —
+   المفتوحة تُحفظ هنا فيعيدها الضغط الثاني إلى الواجهة بدل نافذةٍ ثانية. موقع المحطّة وحده يُعدّ لوحة */
+const BOARDS = new Map();
+function boardOf(u) { try { const x = new URL(String(u || '')); return isAppOrigin(x.origin) && x.searchParams.get('mode') === 'onair' ? (x.searchParams.get('view') || 'board') : ''; } catch (e) { return ''; } }
 const ICON = path.join(__dirname, 'build', 'icon.png');
 /* 1.4 — ويندوز يأخذ ICO بمقاساته (١٦…٢٥٦) فلا تُصغَّر صورةٌ كبيرة في شريط المهامّ وبجانب الساعة */
 const ICON_WIN = path.join(__dirname, 'build', process.platform === 'win32' && fs.existsSync(path.join(__dirname, 'build', 'icon.ico')) ? 'icon.ico' : 'icon.png');
@@ -186,6 +197,15 @@ function createWindow() {
       return { action: 'allow', overrideBrowserWindowOptions: { width: 460, height: 720, minWidth: 320, minHeight: 300, alwaysOnTop: true, autoHideMenuBar: true,
         title: 'TakeFlow TV', backgroundColor: '#0f1320', icon: ICON, webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true, devTools: DEVTOOLS } } };
     }
+    /* 1.9.5 (v751) — لوحة الهواء: نافذةٌ كبيرة مخفيّة حتّى تجهز (تُكبَّر وتُعرض في did-create-window) · لا تُبطَّأ في الخلف ·
+       والمفتوحة لهذا العرض تعود إلى الواجهة بدل ثانية (الصفحة تتلقّى null). بلا electron.screen: التكبير يملأ الشاشة */
+    const bv = boardOf(url);
+    if (bv) {
+      const b = BOARDS.get(bv);
+      if (b && !b.isDestroyed()) { try { if (b.isMinimized()) b.restore(); b.show(); b.focus(); } catch (e) {} return { action: 'deny' }; }
+      return { action: 'allow', overrideBrowserWindowOptions: { width: 1440, height: 900, minWidth: 1024, minHeight: 640, show: false, title: 'TakeFlow TV', backgroundColor: '#0a0e1a', icon: ICON_WIN, autoHideMenuBar: true,
+        webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true, devTools: DEVTOOLS, backgroundThrottling: false } } };
+    }
     try {
       const o = new URL(url).origin;
       if (POPUP_OK.includes(o) || isAppOrigin(o)) return { action: 'allow', overrideBrowserWindowOptions: { width: 560, height: 720, autoHideMenuBar: true, webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true, devTools: DEVTOOLS } } };
@@ -204,6 +224,31 @@ function createWindow() {
     try { child.setMenuBarVisibility(false); } catch (e) {}
     child.webContents.setWindowOpenHandler(({ url }) => { try { openExt(url); } catch (e) {} return { action: 'deny' }; });
     child.webContents.on('will-navigate', (ev) => ev.preventDefault());
+    try { wireContextMenu(child.webContents); } catch (e) {}
+  });
+  /* 1.9.5 (v751) — نافذة لوحة الهواء: تُكبَّر وتُعرض حين تجهز (show: false فوق) · تنتقل داخل المحطّة وحدها وغيرها في المتصفّح ·
+     لا تفتح نوافذ (الرابط إلى المتصفّح) · الشاشة لا تنام ما دامت مفتوحة (يُطلق عند الإغلاق) · تُسجَّل لعرضها فلا تُفتح ثانية */
+  win.webContents.on('did-create-window', (child, d) => {
+    const bv = d ? boardOf(d.url) : ''; if (!bv) return;
+    BOARDS.set(bv, child);
+    child.once('ready-to-show', () => { try { child.maximize(); } catch (e) {} try { child.show(); } catch (e) {} });
+    child.webContents.on('will-navigate', (ev, url) => { try { if (!isAppUrl(url)) { ev.preventDefault(); openExt(url); } } catch (e) { ev.preventDefault(); } });
+    child.webContents.setWindowOpenHandler(({ url }) => { try { openExt(url); } catch (e) {} return { action: 'deny' }; });
+    let blk = -1; try { blk = powerSaveBlocker.start('prevent-display-sleep'); } catch (e) {}
+    child.on('closed', () => { if (BOARDS.get(bv) === child) BOARDS.delete(bv); try { if (blk >= 0) powerSaveBlocker.stop(blk); } catch (e) {} blk = -1; });
+    /* 1.9.5 — تعطّل صفحة اللوحة (نفاد الذاكرة · انهيار): تُعاد وحدها — ثلاث مرّاتٍ في خمس دقائق حدٌّ أقصى · والمجمّدة دقيقةً تُعاد وتُلغى إن عادت تستجيب.
+       عند الخروج أو بعد الإغلاق لا إعادة: النافذة لم تعد مسجّلة في BOARDS (قوائم الإغلاق تسبق المهلة) */
+    const bcr = []; const alive = () => BOARDS.get(bv) === child && !child.isDestroyed();
+    child.webContents.on('render-process-gone', (ev, d) => {
+      if (!d || d.reason === 'clean-exit' || !alive()) return;
+      const now = Date.now(); while (bcr.length && now - bcr[0] > 300000) bcr.shift(); bcr.push(now);
+      console.error('board render-process-gone', d.reason, d.exitCode);
+      if (bcr.length > 3) return;
+      setTimeout(() => { try { if (alive()) child.webContents.reload(); } catch (e) {} }, 1500);
+    });
+    let bhang = null;
+    child.on('unresponsive', () => { clearTimeout(bhang); bhang = setTimeout(() => { try { if (alive()) child.webContents.reload(); } catch (e) {} }, 60000); });
+    child.on('responsive', () => { clearTimeout(bhang); bhang = null; });
     try { wireContextMenu(child.webContents); } catch (e) {}
   });
   /* 1.4.1 — انتقلت المحطّة إلى نطاقها الخاصّ: يُحفظ العنوان الجديد فيفتح التطبيق عليه في المرّة التالية */
@@ -1016,7 +1061,7 @@ ipcMain.handle('tf-agent-scan', async (ev) => {
   return { ok: true, day, on: AGENT.on, files };
 });
 ipcMain.handle('tf-desk-caps', (ev) => fromApp(ev)
-  ? { v: '1.9.3', pin: true, comfyNet: true, comfyInfo: true, asrModels: true, ctx: true, llm: true, vision: true, comfy: true, asr: asrReady(), sys: true, agentTest: true, oldDir: true, dayStart: true, auto: !!MEDIA.root && PATH_OK.test(MEDIA.root), avid: !!MEDIA.avidWatch && PATH_OK.test(MEDIA.avidWatch), paths: !!CFG.openPaths, version: app.getVersion(), updates: UPD.configured, agent: !CFG.agentPaused, agentOn: AGENT.on, devtools: DEVTOOLS, safePaths: true, screen: SCREEN, pullPause: true, cred: credCan(), gallery: true, dragOut: true }
+  ? { v: '1.9.6', pin: true, comfyNet: true, comfyInfo: true, asrModels: true, ctx: true, llm: true, vision: true, comfy: true, asr: asrReady(), sys: true, agentTest: true, oldDir: true, dayStart: true, inews: true, auto: !!MEDIA.root && PATH_OK.test(MEDIA.root), avid: !!MEDIA.avidWatch && PATH_OK.test(MEDIA.avidWatch), paths: !!CFG.openPaths, version: app.getVersion(), updates: UPD.configured, agent: !CFG.agentPaused, agentOn: AGENT.on, devtools: DEVTOOLS, safePaths: true, screen: SCREEN, pullPause: true, cred: credCan(), gallery: true, dragOut: true }
   : {});
 /* 1.9.1 (v715) — «أعد التسمية» من تقرير الاستلام: في المجلّد نفسه وحده داخل جذر المصدر · اسمٌ آمن بلا مسار ولا امتدادٍ آخر ·
    لا يكتب فوق ملفٍّ موجود. الوكيل يرى الاسم الجديد في دورته التالية فيستلمه بقاعدته. */
@@ -1333,6 +1378,15 @@ async function llmFetch(p, o, ms) {
   const ctl = new AbortController(), t = setTimeout(() => ctl.abort(), ms || 5000);
   try { return await fetch(LLM.base + p, Object.assign({ signal: ctl.signal }, o || {})); } finally { clearTimeout(t); }
 }
+/* 1.9.4 (v743) — سبب فشل التنزيل بدقّة. كان كلّ فشلٍ «غير مثبّت» — فيظنّ المحرّر أنّ Ollama نفسه لم يُثبَّت:
+   اسمٌ ليس في مكتبة Ollama (404 · manifest) → no_such_model · نموذجٌ يحتاج Ollama أحدث (412 · newer version) → old_ollama */
+const LLM_PULL_CODES = new Set(['no_such_model', 'old_ollama', 'failed']);
+function llmPullErr(t, status) {
+  const s = String(t || '');
+  if (status === 412 || /newer version|\b412\b/i.test(s)) return 'old_ollama';
+  if (status === 404 || /not found|manifest|does not exist/i.test(s)) return 'no_such_model';
+  return 'failed';
+}
 /* لا نصّ خطأٍ خام إلى الصفحة — رمزٌ تقوله بلغتها */
 const llmErr = (e) => (e && e.name === 'AbortError') ? 'timeout'
   : /ECONNREFUSED|ECONNRESET|fetch failed|EHOSTUNREACH/i.test(String((e && e.message) || '') + ' ' + String((e && e.cause && e.cause.code) || '')) ? 'off' : 'failed';
@@ -1366,7 +1420,7 @@ ipcMain.handle('tf-llm', async (ev, o) => {
       const t0 = Date.now();
       const r = await llmFetch('/api/generate', llmJSON({ model, prompt, system: system || undefined, ...(imgs.length ? { images: imgs } : {}), stream: false, think: false, options: { temperature: temp, num_ctx: llmCtx(prompt.length + system.length) } }), imgs.length ? 300000 : 180000);
       const j = await r.json().catch(() => ({}));
-      if (!r.ok) return { ok: false, error: /not found|pull/i.test(String(j.error || '')) ? 'no_model' : 'failed' };
+      if (!r.ok) return { ok: false, error: /newer version/i.test(String(j.error || '')) ? 'old_ollama' : /not found|pull/i.test(String(j.error || '')) ? 'no_model' : 'failed' };   /* 1.9.4 */
       const text = String(j.response || '').replace(/<think>[\s\S]*?<\/think>/g, '').trim();
       return text ? { ok: true, text: text.slice(0, 40000), ms: Date.now() - t0, model } : { ok: false, error: 'empty' };
     }
@@ -1380,7 +1434,7 @@ ipcMain.handle('tf-llm', async (ev, o) => {
         let done = false;
         try {
           const r = await fetch(LLM.base + '/api/pull', Object.assign({ signal: ctl.signal }, llmJSON({ model, name: model, stream: true })));
-          if (!r.ok || !r.body) throw Object.assign(new Error('pull'), { code: r.status === 404 ? 'no_model' : 'failed' });
+          if (!r.ok || !r.body) throw Object.assign(new Error('pull'), { code: llmPullErr(await r.text().catch(() => ''), r.status) });
           let buf = '', last = -1;
           for await (const ch of r.body) {
             buf += Buffer.from(ch).toString('utf8');
@@ -1389,7 +1443,7 @@ ipcMain.handle('tf-llm', async (ev, o) => {
               const line = buf.slice(0, i).trim(); buf = buf.slice(i + 1);
               if (!line) continue;
               let j; try { j = JSON.parse(line); } catch (e) { continue; }
-              if (j.error) throw Object.assign(new Error('pull'), { code: /not found|manifest/i.test(String(j.error)) ? 'no_model' : 'failed' });
+              if (j.error) throw Object.assign(new Error('pull'), { code: llmPullErr(j.error) });
               if (j.status === 'success') { done = true; continue; }
               const pct = j.total ? Math.min(99, Math.floor((Number(j.completed) || 0) / Number(j.total) * 100)) : null;
               if (pct !== null && pct !== last) { last = pct; send({ status: 'pulling', pct }); }
@@ -1399,7 +1453,7 @@ ipcMain.handle('tf-llm', async (ev, o) => {
         } catch (e) {
           /* 1.9.2 — «أوقف مؤقّتاً» يقطع التيّار وحده: Ollama يحفظ ما نزل، و«استأنف» (pull ثانيةً) يكمل من حيث توقّف */
           if (ctl.__paused) send({ status: 'paused' });
-          else send({ status: 'error', error: e && (e.code === 'no_model' || e.code === 'failed') ? e.code : llmErr(e) });
+          else send({ status: 'error', error: e && LLM_PULL_CODES.has(e.code) ? e.code : llmErr(e) });
         }
         finally { LLM.pulls.delete(model); }
       })();
@@ -1675,4 +1729,123 @@ ipcMain.handle('tf-sys', async (ev) => {
   try { const s = await fs.promises.statfs(os.homedir()); disk = Number(s.bavail) * Number(s.bsize); } catch (e) { disk = 0; }
   const gpu = await gpuInfo().catch(() => null);
   return { ok: true, mem: os.totalmem(), free: os.freemem(), cpus: (os.cpus() || []).length, disk, platform: process.platform, gpu };
+});
+
+/* ═══ الغلاف 1.9.6 (v752) — جسر iNews ═══
+   iNews داخل شبكة المحطّة وTakeFlow في السحابة — فجهازٌ واحد يشغّل تطبيق الكمبيوتر هو الجسر: يقرأ الرن داون من iNews عبر FTP
+   (desktop/inews.js: عميلٌ مدمج بلا تبعيّات، الوضع السلبيّ، قراءةٌ وحدها) كلّ everyMs، ويسلّم اللقطة للصفحة التي تنشرها في قاعدة المحطّة.
+   على نهج وكيل صور النشرة: حالةٌ واحدة، مؤقّتٌ واحد، إعدادٌ محفوظ في userData/config.json تحت inews.
+   كلمة مرور حساب iNews تُحفظ مشفّرةً بمفتاح النظام (safeStorage كما في 1.9.2) ولا تُعاد للصفحة في أيّ ردّ؛ وحيث لا تشفير من النظام
+   تبقى في ذاكرة التشغيل وحدها (تُطلب من جديد بعد إعادة التشغيل). كلّ القنوات من صفحة المحطّة وحدها (fromApp). */
+const inews = require('./inews.js');
+const INEWS = { cfg: null, pw: '', timer: null, running: false, polls: 0, lastAt: 0, lastOk: null, lastError: '', host: '', counts: [] };
+const IN_HOST = /^[A-Za-z0-9.-]{1,120}(?::\d{1,5})?$/;
+const IN_Q = /^[A-Za-z0-9._-]{1,64}$/;
+const IN_MAT = /^[a-z0-9-]{1,40}$/;
+const IN_LIMITS = { hosts: 4, user: 64, password: 128, queues: 12, bulletin: 60, everyMin: 5000, everyMax: 60000 };
+function inEnc(p) { try { if (p && credCan()) return safeStorage.encryptString(String(p)).toString('base64'); } catch (e) {} return ''; }
+function inDec(b64) { try { if (b64 && credCan()) return safeStorage.decryptString(Buffer.from(String(b64), 'base64')); } catch (e) {} return ''; }
+/* التحقّق من الإعداد كما يصل من الصفحة — يعيد { cfg } أو { error } برمزٍ تقوله الصفحة بلغة المستخدم */
+function inValid(o, base) {
+  o = (o && typeof o === 'object') ? o : {}; base = base || {};
+  const pick = (k) => (o[k] !== undefined ? o[k] : base[k]);
+  const hosts = Array.isArray(pick('hosts')) ? pick('hosts').map((h) => String(h || '').trim()).filter(Boolean) : [];
+  if (hosts.length > IN_LIMITS.hosts || hosts.some((h) => !IN_HOST.test(h) || !inews.parseHost(h))) return { error: 'bad_hosts' };
+  const user = String(pick('user') == null ? '' : pick('user')).trim();
+  if (user.length > IN_LIMITS.user || /[\r\n\s]/.test(user)) return { error: 'bad_user' };
+  const qin = Array.isArray(pick('queues')) ? pick('queues') : [];
+  if (qin.length > IN_LIMITS.queues) return { error: 'bad_queues' };
+  const queues = [];
+  for (const x of qin) {
+    const q = String((x && typeof x === 'object' ? x.q : x) || '').trim(), bulletin = seg(x && typeof x === 'object' ? x.bulletin : '', IN_LIMITS.bulletin);
+    if (!IN_Q.test(q)) return { error: 'bad_queues' };
+    queues.push({ q, bulletin });
+  }
+  const everyMs = pick('everyMs') === undefined ? 10000 : Math.round(Number(pick('everyMs')));
+  if (!Number.isFinite(everyMs) || everyMs < IN_LIMITS.everyMin || everyMs > IN_LIMITS.everyMax) return { error: 'bad_every' };
+  const matField = String(pick('matField') == null || pick('matField') === '' ? 'video-id' : pick('matField')).trim().toLowerCase();
+  if (!IN_MAT.test(matField)) return { error: 'bad_mat' };
+  const on = o.on === undefined ? !!base.on : o.on === true;
+  return { cfg: { hosts, user, queues, everyMs, matField, on } };
+}
+function inState() {
+  const c = INEWS.cfg || { hosts: [], user: '', queues: [], everyMs: 10000, matField: 'video-id', on: false };
+  return { on: !!(INEWS.timer), hosts: c.hosts.slice(), user: c.user, queues: c.queues.map((q) => ({ q: q.q, bulletin: q.bulletin })), everyMs: c.everyMs, matField: c.matField,
+    hasPassword: !!INEWS.pw, canStore: credCan(), lastAt: INEWS.lastAt, lastOk: INEWS.lastOk, lastError: INEWS.lastError, host: INEWS.host, polls: INEWS.polls, running: INEWS.running, counts: INEWS.counts };
+}
+function inSave() {
+  const c = INEWS.cfg; if (!c) return;
+  agSaveCfg({ inews: { hosts: c.hosts, user: c.user, password: inEnc(INEWS.pw), queues: c.queues, everyMs: c.everyMs, matField: c.matField, on: !!c.on } });
+}
+function inSend(snap) { try { if (win && !win.isDestroyed()) win.webContents.send('tf-inews-rundown', snap); } catch (e) {} }
+/* دورةٌ واحدة: اتصالٌ واحد وكلّ الطوابير — وإن كانت دورةٌ ما زالت تعمل تُترك هذه */
+async function inTick() {
+  const c = INEWS.cfg; if (!c || INEWS.running) return null;
+  INEWS.running = true;
+  const bridge = seg(require('os').hostname() || '', 60);
+  let out;
+  try {
+    const snap = await inews.pollOnce({ hosts: c.hosts, user: c.user, password: INEWS.pw, queues: c.queues, matField: c.matField });
+    out = Object.assign({ bridge, everyMs: c.everyMs }, snap);
+  } catch (e) {
+    out = { at: Date.now(), ok: false, error: String((e && e.message) || e), bridge, everyMs: c.everyMs, host: '', results: [] };
+  } finally {
+    INEWS.running = false;
+  }
+  INEWS.polls++; INEWS.lastAt = out.at; INEWS.lastOk = !!out.ok; INEWS.host = out.host || '';
+  const bad = (out.results || []).find((r) => !r.ok);
+  INEWS.lastError = out.ok ? (bad ? bad.queue + ': ' + bad.error : '') : (out.error || 'failed');
+  INEWS.counts = (out.results || []).map((r) => ({ queue: r.queue, n: r.n, skipped: r.skipped, ok: r.ok }));
+  inSend(out);
+  return out;
+}
+function inStart() {
+  if (INEWS.timer) clearInterval(INEWS.timer);
+  INEWS.timer = setInterval(() => { inTick().catch(() => {}); }, INEWS.cfg.everyMs);
+  inTick().catch(() => {});
+}
+function inStop() { if (INEWS.timer) clearInterval(INEWS.timer); INEWS.timer = null; }
+/* عند التشغيل: الإعداد المحفوظ وكلمة المرور المشفّرة — ويبدأ وحده إن كان الجسر مفعَّلاً على هذا الجهاز */
+function inBoot() {
+  const saved = (CFG.inews && typeof CFG.inews === 'object') ? CFG.inews : null; if (!saved) return;
+  const v = inValid({}, saved); if (!v.cfg) return;
+  INEWS.cfg = v.cfg; INEWS.pw = inDec(saved.password);
+  if (v.cfg.on && v.cfg.hosts.length && v.cfg.user && INEWS.pw && v.cfg.queues.length) inStart();
+}
+app.on('ready', () => { try { inBoot(); } catch (e) { console.error('inews boot', e.message); } });
+app.on('before-quit', () => inStop());
+ipcMain.handle('tf-inews-set', (ev, o) => {
+  if (!fromApp(ev)) return { ok: false, error: 'origin' };
+  o = (o && typeof o === 'object') ? o : {};
+  const v = inValid(o, INEWS.cfg || {});
+  if (v.error) return Object.assign({ ok: false, error: v.error }, inState());
+  if (o.password !== undefined && o.password !== '') {
+    const p = String(o.password);
+    if (p.length > IN_LIMITS.password || /[\r\n]/.test(p)) return Object.assign({ ok: false, error: 'bad_password' }, inState());
+    INEWS.pw = p;   /* كلمةٌ فارغة تُبقي المحفوظة */
+  }
+  if (v.cfg.on && !(v.cfg.hosts.length && v.cfg.user && INEWS.pw && v.cfg.queues.length)) return Object.assign({ ok: false, error: 'incomplete' }, inState());
+  INEWS.cfg = v.cfg; inSave();
+  if (v.cfg.on) inStart(); else inStop();
+  return Object.assign({ ok: true }, inState());
+});
+ipcMain.handle('tf-inews-state', (ev) => fromApp(ev) ? Object.assign({ ok: true }, inState()) : { ok: false, error: 'origin' });
+ipcMain.handle('tf-inews-stop', (ev) => {
+  if (!fromApp(ev)) return { ok: false, error: 'origin' };
+  inStop(); if (INEWS.cfg) { INEWS.cfg.on = false; inSave(); }
+  return Object.assign({ ok: true }, inState());
+});
+/* «اختبر الاتصال»: دورةٌ واحدة بالإعداد المرسَل فوق المحفوظ، بلا مؤقّت — تعيد عدد قصص كلّ طابور أو الخطأ */
+ipcMain.handle('tf-inews-test', async (ev, o) => {
+  if (!fromApp(ev)) return { ok: false, error: 'origin' };
+  o = (o && typeof o === 'object') ? o : {};
+  const v = inValid(o, INEWS.cfg || {});
+  if (v.error) return { ok: false, error: v.error };
+  const pw = (o.password !== undefined && o.password !== '') ? String(o.password).slice(0, IN_LIMITS.password) : INEWS.pw;
+  if (!(v.cfg.hosts.length && v.cfg.user && pw && v.cfg.queues.length)) return { ok: false, error: 'incomplete' };
+  try {
+    const snap = await inews.pollOnce({ hosts: v.cfg.hosts, user: v.cfg.user, password: pw, queues: v.cfg.queues, matField: v.cfg.matField });
+    return { ok: !!snap.ok, error: snap.ok ? '' : (snap.error || 'failed'), host: snap.host || '', at: snap.at, bytes: snap.bytes,
+      results: (snap.results || []).map((r) => ({ queue: r.queue, bulletin: r.bulletin, ok: r.ok, n: r.n, skipped: r.skipped, error: r.error, subQueues: r.subQueues })) };
+  } catch (e) { return { ok: false, error: String((e && e.message) || e) }; }
 });

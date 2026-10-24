@@ -21,11 +21,26 @@
    الغلاف 1.9.0: comfy({op:'info'}) العقد والنماذج المثبّتة · comfy({op:'url', url}) عنوانٌ على الشبكة الداخليّة بموافقة صاحب الجهاز ·
      comfy({op:'where'}) · asr({op:'models'}) و asr({op:'use', name}) نماذج whisper في مجلّد النموذج · نافذة «النصّ فوق البرامج» (tf-text-pin)
    الغلاف 1.9.3 (v742): fsList(مسار) ملفّات مجلّد الجرافيك بمعايناتها · dragOut(مسار) السحب منه إلى Avid أو أيّ برنامج
-   الغلاف 1.9.2 (v735): cred({op:'can'|'get'|'set'|'clear', u, p}) — الاسم وكلمة المرور مشفّرَين بمفتاح النظام لنطاق المحطّة وحده */
+   الغلاف 1.9.2 (v735): cred({op:'can'|'get'|'set'|'clear', u, p}) — الاسم وكلمة المرور مشفّرَين بمفتاح النظام لنطاق المحطّة وحده
+   الغلاف 1.9.5 (v751): لا جديد في الجسر — نافذة لوحة الهواء (?mode=onair) يفتحها main.js كبيرةً بلا جسر، فلا tfDesktop فيها (كالمنبثقة قبلها)
+   الغلاف 1.9.6 (v752): inewsSet/inewsState/inewsTest/inewsStop جسر iNews على هذا الجهاز (الإعداد · الحالة بلا كلمة المرور · اختبار الاتصال · الإيقاف)
+     · حدث tf-inews-rundown (لقطة الرن داون من iNews كلّ دورة) */
 const { contextBridge, ipcRenderer } = require('electron');
 /* يصل من main.js (additionalArguments) — قراءةٌ متزامنة قبل أن تُرسم الصفحة، فلا يومض الإطار */
 const CHROME = (() => { const a = (process.argv || []).find(x => /^--tf-chrome=/.test(String(x))); const v = a ? String(a).split('=')[1] : ''; return v === 'wco' || v === 'mac' ? v : ''; })();
 
+/* 1.9.6 — وسيط iNews كما يُرسل: المفاتيح المعروفة وحدها، وما لم تذكره الصفحة لا يُرسل (فيبقى المحفوظ) */
+const inewsArg = (o) => {
+  o = (o && typeof o === 'object') ? o : {}; const out = {};
+  if (Array.isArray(o.hosts)) out.hosts = o.hosts.slice(0, 8).map((h) => String(h || '').slice(0, 140));
+  if (o.user !== undefined) out.user = String(o.user || '').slice(0, 80);
+  if (o.password !== undefined) out.password = String(o.password || '').slice(0, 160);
+  if (Array.isArray(o.queues)) out.queues = o.queues.slice(0, 16).map((q) => ({ q: String((q && q.q) || '').slice(0, 80), bulletin: String((q && q.bulletin) || '').slice(0, 80) }));
+  if (o.everyMs !== undefined) out.everyMs = Number(o.everyMs);
+  if (o.matField !== undefined) out.matField = String(o.matField || '').slice(0, 60);
+  if (o.on !== undefined) out.on = o.on === true;
+  return out;
+};
 contextBridge.exposeInMainWorld('tfDesktop', {
   version: process.versions.electron ? 'electron ' + process.versions.electron : 'electron',
   platform: process.platform,
@@ -67,7 +82,13 @@ contextBridge.exposeInMainWorld('tfDesktop', {
   fsList: (p) => ipcRenderer.invoke('tf-fs-list', String(p || '')),   /* 1.9.3 (v742) — مجلّد الجرافيك: ملفّاته بمعايناتها */
   dragOut: (p) => ipcRenderer.send('tf-drag-out', String(p || '')),     /* 1.9.3 — السحب إلى Avid: يُنادى من dragstart نفسه */
   cred: (o) => ipcRenderer.invoke('tf-cred', { op: String((o && o.op) || ''), u: String((o && o.u) || '').slice(0, 64), p: String((o && o.p) || '').slice(0, 256) }),   /* 1.9.2 (v735) — تذكّر الدخول مشفّراً بمفتاح النظام */
+  /* 1.9.6 (v752) — جسر iNews على هذا الجهاز: الإعداد (كلمةٌ فارغة تُبقي المحفوظة) · الحالة (بلا كلمة المرور أبداً) · اختبار الاتصال · الإيقاف */
+  inewsSet: (o) => ipcRenderer.invoke('tf-inews-set', inewsArg(o)),
+  inewsState: () => ipcRenderer.invoke('tf-inews-state'),
+  inewsTest: (o) => ipcRenderer.invoke('tf-inews-test', inewsArg(o)),
+  inewsStop: () => ipcRenderer.invoke('tf-inews-stop'),
   on: (ch, cb) => {
+    if (ch === 'tf-inews-rundown' && typeof cb === 'function') { ipcRenderer.on(ch, (e, d) => cb(d)); return true; }   /* 1.9.6 (v752) — لقطة iNews: القناة التاسعة باسمها */
     if (!['tf-fs-arrived', 'tf-media-progress', 'tf-media-ready', 'tf-media-failed', 'tf-avid-progress', 'tf-update-state', 'tf-agent-file', 'tf-llm-pull'].includes(ch) || typeof cb !== 'function') return false;
     ipcRenderer.on(ch, (e, d) => cb(d));
     return true;
