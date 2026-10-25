@@ -56,6 +56,7 @@
    الغلاف 1.9.5 (v751) — نافذة لوحة الهواء من الصفحة: زرّ اللوحة كان يفتحها منبثقةً صغيرة (560×720) تُبطَّأ في الخلف. صارت نافذةً
      كبيرة تُكبَّر حين تجهز، لا تُبطَّأ، وتمنع الشاشة من النوم ما دامت مفتوحة، وتنتقل داخل المحطّة وحدها — والضغط ثانيةً يعيد المفتوحة
      إلى الواجهة بدل نافذةٍ ثانية. و«شاشة لوحة الهواء» (1.9.1 · --onair) لجهاز التلفزيون كما هي
+   الغلاف 1.9.7 (v756) — النافذة المنبثقة العامّة مقفلة: تنتقل بين أصول الربط والمحطّة وحدها ولا تفتح نوافذ · مجلّد الطلب بيوم بثّه.
    الغلاف 1.9.6 (v752) — جسر iNews: جهازٌ واحد في المحطّة يقرأ الرن داون من خادم iNews عبر FTP (desktop/inews.js: عميلٌ مدمج
      بلا تبعيّات · الوضع السلبيّ · قراءةٌ وحدها) كلّ عشر ثوانٍ ويسلّم اللقطة للصفحة (tf-inews-rundown) فتنشرها لباقي الأجهزة.
      الإعداد في config.json (inews) وكلمة المرور مشفّرةٌ بمفتاح النظام (safeStorage) ولا تُعاد للصفحة أبداً. ما يخرج من الجهاز:
@@ -250,6 +251,16 @@ function createWindow() {
     child.on('unresponsive', () => { clearTimeout(bhang); bhang = setTimeout(() => { try { if (alive()) child.webContents.reload(); } catch (e) {} }, 60000); });
     child.on('responsive', () => { clearTimeout(bhang); bhang = null; });
     try { wireContextMenu(child.webContents); } catch (e) {}
+  });
+  /* 1.9.7 (v756) — النافذة المنبثقة العامّة (ربط البريد عبر Google وMicrosoft · صفحةٌ من المحطّة) كانت بلا قفل: تنتقل إلى أيّ موقع
+     وتفتح نوافذ. الآن تنتقل بين أصول الربط والمحطّة وحدها (POPUP_OK · isAppOrigin) وما سواها في المتصفّح، ولا تفتح نوافذ.
+     نافذة النصّ ولوحة الهواء لهما قفلهما تحت */
+  win.webContents.on('did-create-window', (child, d) => {
+    if (!d || d.frameName === 'tf-text-pin' || boardOf(d.url)) return;
+    const ok = (u) => { try { const o = new URL(u).origin; return POPUP_OK.includes(o) || isAppOrigin(o); } catch (e) { return false; } };
+    child.webContents.on('will-navigate', (ev, url) => { if (!ok(url)) { ev.preventDefault(); try { openExt(url); } catch (e) {} } });
+    child.webContents.on('will-redirect', (ev, url) => { if (!ok(url)) { ev.preventDefault(); try { openExt(url); } catch (e) {} } });
+    child.webContents.setWindowOpenHandler(({ url }) => { try { openExt(url); } catch (e) {} return { action: 'deny' }; });
   });
   /* 1.4.1 — انتقلت المحطّة إلى نطاقها الخاصّ: يُحفظ العنوان الجديد فيفتح التطبيق عليه في المرّة التالية */
   win.webContents.on('did-navigate', (ev, url) => { try { rememberAppUrl(url); } catch (e) {} });
@@ -1061,7 +1072,7 @@ ipcMain.handle('tf-agent-scan', async (ev) => {
   return { ok: true, day, on: AGENT.on, files };
 });
 ipcMain.handle('tf-desk-caps', (ev) => fromApp(ev)
-  ? { v: '1.9.6', pin: true, comfyNet: true, comfyInfo: true, asrModels: true, ctx: true, llm: true, vision: true, comfy: true, asr: asrReady(), sys: true, agentTest: true, oldDir: true, dayStart: true, inews: true, auto: !!MEDIA.root && PATH_OK.test(MEDIA.root), avid: !!MEDIA.avidWatch && PATH_OK.test(MEDIA.avidWatch), paths: !!CFG.openPaths, version: app.getVersion(), updates: UPD.configured, agent: !CFG.agentPaused, agentOn: AGENT.on, devtools: DEVTOOLS, safePaths: true, screen: SCREEN, pullPause: true, cred: credCan(), gallery: true, dragOut: true }
+  ? { v: '1.9.7', pin: true, comfyNet: true, comfyInfo: true, asrModels: true, ctx: true, llm: true, vision: true, comfy: true, asr: asrReady(), sys: true, agentTest: true, oldDir: true, dayStart: true, inews: true, popLock: true, auto: !!MEDIA.root && PATH_OK.test(MEDIA.root), avid: !!MEDIA.avidWatch && PATH_OK.test(MEDIA.avidWatch), paths: !!CFG.openPaths, version: app.getVersion(), updates: UPD.configured, agent: !CFG.agentPaused, agentOn: AGENT.on, devtools: DEVTOOLS, safePaths: true, screen: SCREEN, pullPause: true, cred: credCan(), gallery: true, dragOut: true }
   : {});
 /* 1.9.1 (v715) — «أعد التسمية» من تقرير الاستلام: في المجلّد نفسه وحده داخل جذر المصدر · اسمٌ آمن بلا مسار ولا امتدادٍ آخر ·
    لا يكتب فوق ملفٍّ موجود. الوكيل يرى الاسم الجديد في دورته التالية فيستلمه بقاعدته. */
@@ -1117,7 +1128,8 @@ ipcMain.handle('tf-fs-auto', async (ev, o) => {
   if (!MEDIA.root || !PATH_OK.test(MEDIA.root)) return { ok: false, error: 'no_root' };
   o = o || {};
   const d = new Date(), pad = (n) => String(n).padStart(2, '0');
-  const day = d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
+  /* 1.9.7 (v756) — يوم البثّ من الصفحة (YYYY-MM-DD) حين يأتي، وإلّا اليوم — كان يوم النقر دائماً فيُنشأ طلب الغد في مجلّد اليوم */
+  const day = /^20\d\d-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/.test(String(o.day || '')) ? String(o.day) : d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
   const item = [seg(o.ref, 40), seg(o.title, 60)].filter(Boolean).join(' - ') || 'بلا عنوان';
   const full = PX(MEDIA.root).join(MEDIA.root, day, seg(o.show, 50) || 'عامّ', item, o.role === 'montage' ? 'المونتاج' : 'التصميم');
   if (!PATH_OK.test(full)) return { ok: false, error: 'bad_path' };

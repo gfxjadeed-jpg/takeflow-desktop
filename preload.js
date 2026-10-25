@@ -52,7 +52,7 @@ contextBridge.exposeInMainWorld('tfDesktop', {
   focus: () => ipcRenderer.send('tf-focus'),
   caps: () => ipcRenderer.invoke('tf-desk-caps'),
   pick: (k) => ipcRenderer.invoke('tf-desk-pick', String(k || '')),
-  fsAuto: (o) => ipcRenderer.invoke('tf-fs-auto', { show: String((o && o.show) || ''), title: String((o && o.title) || ''), ref: String((o && o.ref) || ''), role: String((o && o.role) || '') }),
+  fsAuto: (o) => ipcRenderer.invoke('tf-fs-auto', { show: String((o && o.show) || ''), title: String((o && o.title) || ''), ref: String((o && o.ref) || ''), role: String((o && o.role) || ''), day: String((o && o.day) || '') }),   /* 1.9.7 — ويوم البثّ */
   fsCheck: (p) => ipcRenderer.invoke('tf-fs-check', String(p || '')),
   fsWatch: (p, id) => ipcRenderer.invoke('tf-fs-watch', { path: String(p || ''), id: String(id || '') }),
   fsUnwatch: (id) => ipcRenderer.invoke('tf-fs-unwatch', String(id || '')),
