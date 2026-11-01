@@ -50,6 +50,8 @@ contextBridge.exposeInMainWorld('tfDesktop', {
   info: () => ipcRenderer.invoke('tf-desktop-info'),
   setBadge: (n) => ipcRenderer.send('tf-badge', Math.max(0, Math.min(999, Number(n) || 0))),
   focus: () => ipcRenderer.send('tf-focus'),
+  /* 1.9.8 — نافذة العمل: الشفافيّة · الشريط المصغّر · فوق البرامج */
+  pinSet: (o) => ipcRenderer.send('tf-pin-set', { opacity: Number(o && o.opacity) || 0, mode: (o && (o.mode === 'compact' || o.mode === 'full')) ? o.mode : '', top: (o && typeof o.top === 'boolean') ? o.top : null }),
   caps: () => ipcRenderer.invoke('tf-desk-caps'),
   pick: (k) => ipcRenderer.invoke('tf-desk-pick', String(k || '')),
   fsAuto: (o) => ipcRenderer.invoke('tf-fs-auto', { show: String((o && o.show) || ''), title: String((o && o.title) || ''), ref: String((o && o.ref) || ''), role: String((o && o.role) || ''), day: String((o && o.day) || '') }),   /* 1.9.7 — ويوم البثّ */

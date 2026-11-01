@@ -220,6 +220,8 @@ function createWindow() {
   /* 1.9.0 — نافذة النصّ: فوق البرامج كلّها (وفوق ملء الشاشة في ماك) · لا تنتقل إلى أيّ مكان ولا تفتح نوافذ · نسخٌ ولصقٌ بالنقر الأيمن */
   win.webContents.on('did-create-window', (child, d) => {
     if (!d || d.frameName !== 'tf-text-pin') return;
+    PINWIN = child;   /* 1.9.8 — نافذة العمل: الشفافيّة والشريط المصغّر (tf-pin-set) */
+    try { if (typeof child.on === 'function') child.on('closed', () => { if (PINWIN === child) PINWIN = null; }); } catch (e) {}
     try { child.setAlwaysOnTop(true, 'floating'); } catch (e) {}
     try { if (process.platform === 'darwin') child.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true }); } catch (e) {}
     try { child.setMenuBarVisibility(false); } catch (e) {}
@@ -781,6 +783,30 @@ const WIN_CMD = {
   pickRoot: () => pickFolder('root'), pickAvid: () => pickFolder('avidWatch'),
   downloads: () => shell.openPath(app.getPath('downloads')),
 };
+/* ═══ 1.9.8 (v838) — نافذة العمل فوق البرامج: الشفافيّة (٣٠–١٠٠٪) · الشريط المصغّر وعودته · البقاء فوق البرامج أو لا ═══
+   من صفحة المحطّة وحدها، وعلى نافذة tf-text-pin وحدها (PINWIN). الشريط: ٦٨٠×٦٤ في مكانه، والعودة إلى المقاس السابق. */
+let PINWIN = null;
+const PIN_BAR = { width: 680, height: 64 };
+ipcMain.on('tf-pin-set', (ev, o) => {
+  if (!fromApp(ev)) return;
+  const p = PINWIN; if (!p || (typeof p.isDestroyed === 'function' && p.isDestroyed())) return;
+  o = (o && typeof o === 'object') ? o : {};
+  try {
+    const op = Number(o.opacity);
+    if (isFinite(op) && op > 0) p.setOpacity(Math.max(0.3, Math.min(1, op)));
+    if (o.mode === 'compact') {
+      if (!p._tfFull) p._tfFull = p.getBounds();
+      /* v839 — المقاس للمحتوى لا للإطار: شريط العنوان لا يأكل الشريط */
+      const b = p.getBounds(), cb = p.getContentBounds(), fh = Math.max(0, b.height - cb.height), fw = Math.max(0, b.width - cb.width);
+      p.setMinimumSize(360 + fw, 56 + fh);
+      p.setContentBounds({ x: cb.x, y: cb.y, width: PIN_BAR.width, height: PIN_BAR.height });
+    } else if (o.mode === 'full' && p._tfFull) {
+      const f = p._tfFull; p._tfFull = null;
+      p.setMinimumSize(320, 300); p.setBounds(f);
+    }
+    if (o.top === true || o.top === false) p.setAlwaysOnTop(o.top, 'floating');
+  } catch (e) { console.error('pin-set', e.message); }
+});
 ipcMain.on('tf-win-cmd', (ev, name) => {
   if (!fromApp(ev) || !win || win.isDestroyed()) return;
   const f = Object.prototype.hasOwnProperty.call(WIN_CMD, String(name)) ? WIN_CMD[String(name)] : null;
@@ -1072,7 +1098,7 @@ ipcMain.handle('tf-agent-scan', async (ev) => {
   return { ok: true, day, on: AGENT.on, files };
 });
 ipcMain.handle('tf-desk-caps', (ev) => fromApp(ev)
-  ? { v: '1.9.7', pin: true, comfyNet: true, comfyInfo: true, asrModels: true, ctx: true, llm: true, vision: true, comfy: true, asr: asrReady(), sys: true, agentTest: true, oldDir: true, dayStart: true, inews: true, popLock: true, auto: !!MEDIA.root && PATH_OK.test(MEDIA.root), avid: !!MEDIA.avidWatch && PATH_OK.test(MEDIA.avidWatch), paths: !!CFG.openPaths, version: app.getVersion(), updates: UPD.configured, agent: !CFG.agentPaused, agentOn: AGENT.on, devtools: DEVTOOLS, safePaths: true, screen: SCREEN, pullPause: true, cred: credCan(), gallery: true, dragOut: true }
+  ? { v: '1.9.8', pin: true, comfyNet: true, comfyInfo: true, asrModels: true, ctx: true, llm: true, vision: true, comfy: true, asr: asrReady(), sys: true, agentTest: true, oldDir: true, dayStart: true, inews: true, popLock: true, pinSet: true, auto: !!MEDIA.root && PATH_OK.test(MEDIA.root), avid: !!MEDIA.avidWatch && PATH_OK.test(MEDIA.avidWatch), paths: !!CFG.openPaths, version: app.getVersion(), updates: UPD.configured, agent: !CFG.agentPaused, agentOn: AGENT.on, devtools: DEVTOOLS, safePaths: true, screen: SCREEN, pullPause: true, cred: credCan(), gallery: true, dragOut: true }
   : {});
 /* 1.9.1 (v715) — «أعد التسمية» من تقرير الاستلام: في المجلّد نفسه وحده داخل جذر المصدر · اسمٌ آمن بلا مسار ولا امتدادٍ آخر ·
    لا يكتب فوق ملفٍّ موجود. الوكيل يرى الاسم الجديد في دورته التالية فيستلمه بقاعدته. */
