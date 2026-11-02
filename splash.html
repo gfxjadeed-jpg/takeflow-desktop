@@ -61,6 +61,9 @@
   .foot label { display: flex; align-items: center; gap: 6px; cursor: pointer; min-height: 28px; }
   .foot input { width: 16px; height: 16px; accent-color: currentColor; }
   .ver { direction: ltr; opacity: .75; }
+  /* 1.9.10 — اللغة من شاشة البداية */
+  .lang { -webkit-app-region: no-drag; min-height: 28px; padding: 2px 12px; border: 1px solid currentColor; border-radius: 999px; background: transparent; color: inherit; font: inherit; font-size: 12px; font-weight: 600; cursor: pointer; }
+  .lang:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; }
   [hidden] { display: none !important; }
   @keyframes spin { to { transform: rotate(360deg); } }
   @media (prefers-reduced-motion: reduce) { .st.on i { animation: none; } .ph, .splash, .bar b { transition: none; } }
@@ -92,6 +95,7 @@
   </div>
   <div class="foot">
     <label><input type="checkbox" id="auto"><span id="auto-t"></span></label>
+    <button class="lang" id="lang" type="button"></button>
     <span class="ver" id="ver"></span>
   </div>
 </div>
@@ -151,6 +155,9 @@
     $('auto-t').textContent = L('auto'); $('auto').checked = !!S.autostart;
     $('ver').textContent = S.version ? L('ver') + S.version : '';
     $('x').title = L('x'); $('x').setAttribute('aria-label', L('x'));
+    /* 1.9.10 — الزرّ باسم اللغة الأخرى بلغتها، وعنوانه بلغة الشاشة */
+    $('lang').textContent = ar() ? 'English' : 'عربي'; $('lang').lang = ar() ? 'en' : 'ar';
+    $('lang').title = ar() ? 'اعرض البرنامج بالإنكليزيّة' : 'Show the app in Arabic'; $('lang').setAttribute('aria-label', $('lang').title);
   }
   var api = window.tfSplash;
   function cmd(c, o) { try { if (api && typeof api.cmd === 'function') api.cmd(c, o || {}); } catch (e) {} }
@@ -166,6 +173,7 @@
     try { if (api && typeof api.login === 'function') api.login(u, p, !!$('lg-k').checked); } catch (er) {}
   });
   $('lg-open').addEventListener('click', function () { cmd('open'); });
+  $('lang').addEventListener('click', function () { S.lang = ar() ? 'en' : 'ar'; paint(); cmd('lang', { lang: S.lang }); });   /* 1.9.10 */
   $('auto').addEventListener('change', function () { S.autostart = !!$('auto').checked; cmd('autostart', { on: S.autostart }); });
   document.addEventListener('keydown', function (e) { if (e.key === 'Escape') cmd('open'); });
   if (api && typeof api.on === 'function') api.on(function (d) {

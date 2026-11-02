@@ -34,7 +34,7 @@ const SPLASH = (process.argv || []).includes('--tf-splash');
 if (SPLASH) {
   contextBridge.exposeInMainWorld('tfSplash', {
     on: (cb) => { if (typeof cb !== 'function') return false; ipcRenderer.on('tf-splash-state', (e, d) => cb(d)); return true; },
-    cmd: (c, o) => ipcRenderer.send('tf-splash-cmd', { cmd: String(c || '').slice(0, 16), on: !!(o && o.on === true) }),
+    cmd: (c, o) => ipcRenderer.send('tf-splash-cmd', { cmd: String(c || '').slice(0, 16), on: !!(o && o.on === true), lang: o && o.lang === 'en' ? 'en' : 'ar' }),   /* 1.9.10 — واللغة */
     login: (u, p, keep) => ipcRenderer.send('tf-splash-login', { u: String(u || '').slice(0, 64), p: String(p || '').slice(0, 256), keep: keep === true }),   /* v936 */
   });
 } else {
@@ -104,7 +104,7 @@ contextBridge.exposeInMainWorld('tfDesktop', {
   inewsTest: (o) => ipcRenderer.invoke('tf-inews-test', inewsArg(o)),
   inewsStop: () => ipcRenderer.invoke('tf-inews-stop'),
   on: (ch, cb) => {
-    if (ch === 'tf-splash-login' && typeof cb === 'function') { ipcRenderer.on(ch, (e, d) => cb(d)); return true; }   /* v936 — الدخول من شاشة البداية */
+    if ((ch === 'tf-splash-login' || ch === 'tf-splash-lang') && typeof cb === 'function') { ipcRenderer.on(ch, (e, d) => cb(d)); return true; }   /* 1.9.10 — واللغة من شاشة البداية */   /* v936 — الدخول من شاشة البداية */
     if (ch === 'tf-inews-rundown' && typeof cb === 'function') { ipcRenderer.on(ch, (e, d) => cb(d)); return true; }   /* 1.9.6 (v752) — لقطة iNews: القناة التاسعة باسمها */
     if (!['tf-fs-arrived', 'tf-media-progress', 'tf-media-ready', 'tf-media-failed', 'tf-avid-progress', 'tf-update-state', 'tf-agent-file', 'tf-llm-pull'].includes(ch) || typeof cb !== 'function') return false;
     ipcRenderer.on(ch, (e, d) => cb(d));

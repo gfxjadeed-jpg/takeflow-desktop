@@ -177,7 +177,7 @@ function createWindow() {
   win.webContents.on('did-start-loading', () => { titlebarSeen = false; bootFailed = false; splashSend({ stage: 'net' }); });
   win.webContents.on('did-finish-load', () => {
     /* 1.9.9 — الصفحة وصلت: صفحةٌ أقدم لا تقول «جاهز» ← تظهر بعد عشرين ثانية. صفحة «لا شبكة» (بعد did-fail-load) لا تُعدّ وصولاً */
-    if (!bootFailed) { splashSend({ stage: 'page' }); if (bootPending()) { clearTimeout(bootSoft); bootSoft = setTimeout(() => bootShow('timeout'), SPLASH_WAIT); unrefT(bootSoft); } }
+    if (!bootFailed) { splashSend({ stage: 'page' }); if (bootPending() && !splashLast.login) { clearTimeout(bootSoft); bootSoft = setTimeout(() => bootShow('timeout'), SPLASH_WAIT); unrefT(bootSoft); } }
     if (!CHROME) return;
     clearTimeout(titlebarTimer);
     titlebarTimer = setTimeout(() => { if (!titlebarSeen && win && !win.isDestroyed()) titlebarFallback(); }, 10000);
@@ -897,7 +897,9 @@ ipcMain.on('tf-boot', (ev, o) => {
   if (typeof o.name === 'string') st.name = o.name.slice(0, 40);
   /* v936 — صندوق الدخول: الصفحة تطلب الدخول وشاشة البداية قائمة ← يُدخَل منها (والنافذة تبقى مخفيّة) · الخطأ يُقال فيها ·
      show: الصفحة تحتاج المستخدم (رمز التحقّق · تغيير كلمة المرور) ← تظهر النافذة */
-  if (stage === 'auth' && o.login === true) { st.login = true; st.name = ''; st.err = SPLASH_ERRS.includes(o.err) ? o.err : ''; const c = credSaved(); st.user = c ? c.u : ''; st.saved = !!c; st.keep = credCan(); clearTimeout(loginSafe); }
+  if (stage === 'auth' && o.login === true) { st.login = true; st.name = ''; st.err = SPLASH_ERRS.includes(o.err) ? o.err : ''; const c = credSaved(); st.user = c ? c.u : ''; st.saved = !!c; st.keep = credCan(); clearTimeout(loginSafe);
+    /* 1.9.10 (v959) — محمد: «لمّا نطرت شوي فتح صفحة دخول كبيرة». صندوق الدخول الصغير ينتظر صاحبه: لا مهلة تُظهر النافذة الكبيرة فوقه */
+    clearTimeout(bootSoft); clearTimeout(bootHard); bootSoft = bootHard = null; }
   else st.login = false;
   splashSend(st);
   if (stage === 'data' || stage === 'ready') { if (st.name) splashMetaSave({ name: st.name, lang: st.lang || 'ar', tz: st.tz || 'Asia/Beirut' }); clearTimeout(loginSafe); }
@@ -997,6 +999,7 @@ ipcMain.handle('tf-splash-photos', async (ev, o) => {
 ipcMain.on('tf-splash-cmd', (ev, o) => {
   if (!isSplash(ev)) return;
   const c = String((o && o.cmd) || '');
+  if (c === 'lang') { const l = o && o.lang === 'en' ? 'en' : 'ar'; splashMetaSave({ lang: l }); splashSend({ lang: l }); try { if (win && !win.isDestroyed()) win.webContents.send('tf-splash-lang', { lang: l }); } catch (e) {} return; }   /* 1.9.10 (v959) — اللغة من شاشة البداية */
   if (c === 'retry') { bootFailed = false; clearTimeout(loginSafe); try { if (win && !win.isDestroyed()) win.loadURL(SCREEN ? screenUrl() : CFG.url); } catch (e) {} }
   else if (c === 'open') bootShow('user');
   else if (c === 'quit') { quitting = true; app.quit(); }
@@ -1283,7 +1286,7 @@ ipcMain.handle('tf-agent-scan', async (ev) => {
   return { ok: true, day, on: AGENT.on, files };
 });
 ipcMain.handle('tf-desk-caps', (ev) => fromApp(ev)
-  ? { v: '1.9.9', pin: true, comfyNet: true, comfyInfo: true, asrModels: true, ctx: true, llm: true, vision: true, comfy: true, asr: asrReady(), sys: true, agentTest: true, oldDir: true, dayStart: true, inews: true, popLock: true, pinSet: true, splash: SPLASH_ON, boot: true, splashPhotos: true, splashLogin: true, auto: !!MEDIA.root && PATH_OK.test(MEDIA.root), avid: !!MEDIA.avidWatch && PATH_OK.test(MEDIA.avidWatch), paths: !!CFG.openPaths, version: app.getVersion(), updates: UPD.configured, agent: !CFG.agentPaused, agentOn: AGENT.on, devtools: DEVTOOLS, safePaths: true, screen: SCREEN, pullPause: true, cred: credCan(), gallery: true, dragOut: true }
+  ? { v: '1.9.10', pin: true, comfyNet: true, comfyInfo: true, asrModels: true, ctx: true, llm: true, vision: true, comfy: true, asr: asrReady(), sys: true, agentTest: true, oldDir: true, dayStart: true, inews: true, popLock: true, pinSet: true, splash: SPLASH_ON, boot: true, splashPhotos: true, splashLogin: true, auto: !!MEDIA.root && PATH_OK.test(MEDIA.root), avid: !!MEDIA.avidWatch && PATH_OK.test(MEDIA.avidWatch), paths: !!CFG.openPaths, version: app.getVersion(), updates: UPD.configured, agent: !CFG.agentPaused, agentOn: AGENT.on, devtools: DEVTOOLS, safePaths: true, screen: SCREEN, pullPause: true, cred: credCan(), gallery: true, dragOut: true }
   : {});
 /* 1.9.1 (v715) — «أعد التسمية» من تقرير الاستلام: في المجلّد نفسه وحده داخل جذر المصدر · اسمٌ آمن بلا مسار ولا امتدادٍ آخر ·
    لا يكتب فوق ملفٍّ موجود. الوكيل يرى الاسم الجديد في دورته التالية فيستلمه بقاعدته. */
