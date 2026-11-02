@@ -843,6 +843,7 @@ function titlebarFallback() {
 const SPLASH_ON = CHROME && !SCREEN && !START_HIDDEN && CFG.splash !== false;
 const SPLASH_FILE = path.join(__dirname, 'splash.html');
 const SPLASH_WAIT = 20000, SPLASH_MAX = 45000;
+let splashLangWant = '';   /* 1.9.12 (v971) — لغةٌ اختيرت في شاشة البداية قبل أن تجهز الصفحة: تُعاد إليها حين تتكلّم */
 let SPLASH = null, splashLast = {}, bootShown = false, bootFailed = false, bootSoft = null, bootHard = null;
 const unrefT = (t) => { try { if (t && typeof t.unref === 'function') t.unref(); } catch (e) {} };
 function splashOpen() {
@@ -893,6 +894,8 @@ ipcMain.on('tf-boot', (ev, o) => {
   if (BOOT_STAGES.indexOf(stage) < BOOT_STAGES.indexOf(splashLast.stage)) return;   /* لا رجوع إلى خطوةٍ سابقة في التحميل نفسه (إعادة التحميل تبدأ من net) */
   const st = { stage, busy: false };
   if (o.lang === 'ar' || o.lang === 'en') st.lang = o.lang;
+  if (splashLangWant && st.lang && st.lang !== splashLangWant) { st.lang = splashLangWant; try { if (win && !win.isDestroyed()) win.webContents.send('tf-splash-lang', { lang: splashLangWant }); } catch (e) {} }
+  else if (st.lang && st.lang === splashLangWant) splashLangWant = '';
   if (typeof o.tz === 'string' && /^[A-Za-z_]+\/[A-Za-z_]+$/.test(o.tz)) st.tz = o.tz;
   if (typeof o.name === 'string') st.name = o.name.slice(0, 40);
   /* v936 — صندوق الدخول: الصفحة تطلب الدخول وشاشة البداية قائمة ← يُدخَل منها (والنافذة تبقى مخفيّة) · الخطأ يُقال فيها ·
@@ -991,6 +994,8 @@ ipcMain.handle('tf-splash-photos', async (ev, o) => {
     const used = new Set(Object.values(files).map((x) => x && x.f));
     for (const n of fs.readdirSync(DOOR_DIR())) if (/^door-/.test(n) && !used.has(n)) { try { fs.rmSync(path.join(DOOR_DIR(), n), { force: true }); } catch (e) {} }
     splashMetaSave({ files });
+    /* 1.9.12 (v970) — أوّل تشغيلٍ على جهاز: الصور تصل من صفحة الدخول وشاشة البداية ما زالت ظاهرة — تُعرض فوراً لا في المرّة القادمة */
+    if (got.length) { try { splashSend({ photos: doorPhotos() }); } catch (e) {} }
     return { ok: true, slots: Object.keys(files), got };
   } catch (e) { return { ok: false, error: 'write' }; } finally { doorBusy = false; }
 });
@@ -999,7 +1004,7 @@ ipcMain.handle('tf-splash-photos', async (ev, o) => {
 ipcMain.on('tf-splash-cmd', (ev, o) => {
   if (!isSplash(ev)) return;
   const c = String((o && o.cmd) || '');
-  if (c === 'lang') { const l = o && o.lang === 'en' ? 'en' : 'ar'; splashMetaSave({ lang: l }); splashSend({ lang: l }); try { if (win && !win.isDestroyed()) win.webContents.send('tf-splash-lang', { lang: l }); } catch (e) {} return; }   /* 1.9.10 (v959) — اللغة من شاشة البداية */
+  if (c === 'lang') { const l = o && o.lang === 'en' ? 'en' : 'ar'; splashLangWant = l; splashMetaSave({ lang: l }); splashSend({ lang: l }); try { if (win && !win.isDestroyed()) win.webContents.send('tf-splash-lang', { lang: l }); } catch (e) {} return; }   /* 1.9.10 (v959) — اللغة من شاشة البداية */
   if (c === 'retry') { bootFailed = false; clearTimeout(loginSafe); try { if (win && !win.isDestroyed()) win.loadURL(SCREEN ? screenUrl() : CFG.url); } catch (e) {} }
   else if (c === 'open') bootShow('user');
   else if (c === 'quit') { quitting = true; app.quit(); }
@@ -1286,7 +1291,7 @@ ipcMain.handle('tf-agent-scan', async (ev) => {
   return { ok: true, day, on: AGENT.on, files };
 });
 ipcMain.handle('tf-desk-caps', (ev) => fromApp(ev)
-  ? { v: '1.9.11', pin: true, comfyNet: true, comfyInfo: true, asrModels: true, ctx: true, llm: true, vision: true, comfy: true, asr: asrReady(), sys: true, agentTest: true, oldDir: true, dayStart: true, inews: true, popLock: true, pinSet: true, splash: SPLASH_ON, boot: true, splashPhotos: true, splashLogin: true, auto: !!MEDIA.root && PATH_OK.test(MEDIA.root), avid: !!MEDIA.avidWatch && PATH_OK.test(MEDIA.avidWatch), paths: !!CFG.openPaths, version: app.getVersion(), updates: UPD.configured, agent: !CFG.agentPaused, agentOn: AGENT.on, devtools: DEVTOOLS, safePaths: true, screen: SCREEN, pullPause: true, cred: credCan(), gallery: true, dragOut: true }
+  ? { v: '1.9.12', pin: true, comfyNet: true, comfyInfo: true, asrModels: true, ctx: true, llm: true, vision: true, comfy: true, asr: asrReady(), sys: true, agentTest: true, oldDir: true, dayStart: true, inews: true, popLock: true, pinSet: true, splash: SPLASH_ON, boot: true, splashPhotos: true, splashLogin: true, auto: !!MEDIA.root && PATH_OK.test(MEDIA.root), avid: !!MEDIA.avidWatch && PATH_OK.test(MEDIA.avidWatch), paths: !!CFG.openPaths, version: app.getVersion(), updates: UPD.configured, agent: !CFG.agentPaused, agentOn: AGENT.on, devtools: DEVTOOLS, safePaths: true, screen: SCREEN, pullPause: true, cred: credCan(), gallery: true, dragOut: true }
   : {});
 /* 1.9.1 (v715) — «أعد التسمية» من تقرير الاستلام: في المجلّد نفسه وحده داخل جذر المصدر · اسمٌ آمن بلا مسار ولا امتدادٍ آخر ·
    لا يكتب فوق ملفٍّ موجود. الوكيل يرى الاسم الجديد في دورته التالية فيستلمه بقاعدته. */
