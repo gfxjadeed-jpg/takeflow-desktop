@@ -24,8 +24,20 @@
    الغلاف 1.9.2 (v735): cred({op:'can'|'get'|'set'|'clear', u, p}) — الاسم وكلمة المرور مشفّرَين بمفتاح النظام لنطاق المحطّة وحده
    الغلاف 1.9.5 (v751): لا جديد في الجسر — نافذة لوحة الهواء (?mode=onair) يفتحها main.js كبيرةً بلا جسر، فلا tfDesktop فيها (كالمنبثقة قبلها)
    الغلاف 1.9.6 (v752): inewsSet/inewsState/inewsTest/inewsStop جسر iNews على هذا الجهاز (الإعداد · الحالة بلا كلمة المرور · اختبار الاتصال · الإيقاف)
-     · حدث tf-inews-rundown (لقطة الرن داون من iNews كلّ دورة) */
+     · حدث tf-inews-rundown (لقطة الرن داون من iNews كلّ دورة)
+   الغلاف 1.9.9 (v935): boot({stage, login, name, lang, tz}) الصفحة تقول أين وصلت لشاشة البداية (page · auth · data · ready)
+     · نافذة شاشة البداية (--tf-splash) تحمل tfSplash وحده: on(حال) و cmd(retry · open · quit · autostart) — ولا tfDesktop فيها
+   v936: splashPhotos([{s, u}]) صور الباب للجهاز · boot يقول show و err · حدث tf-splash-login (الدخول من شاشة البداية) · tfSplash.login(u, p, keep) */
 const { contextBridge, ipcRenderer } = require('electron');
+/* 1.9.9 — شاشة البداية: جسرٌ أضيق على نافذتها وحدها، ولا شيء من جسر الصفحة */
+const SPLASH = (process.argv || []).includes('--tf-splash');
+if (SPLASH) {
+  contextBridge.exposeInMainWorld('tfSplash', {
+    on: (cb) => { if (typeof cb !== 'function') return false; ipcRenderer.on('tf-splash-state', (e, d) => cb(d)); return true; },
+    cmd: (c, o) => ipcRenderer.send('tf-splash-cmd', { cmd: String(c || '').slice(0, 16), on: !!(o && o.on === true) }),
+    login: (u, p, keep) => ipcRenderer.send('tf-splash-login', { u: String(u || '').slice(0, 64), p: String(p || '').slice(0, 256), keep: keep === true }),   /* v936 */
+  });
+} else {
 /* يصل من main.js (additionalArguments) — قراءةٌ متزامنة قبل أن تُرسم الصفحة، فلا يومض الإطار */
 const CHROME = (() => { const a = (process.argv || []).find(x => /^--tf-chrome=/.test(String(x))); const v = a ? String(a).split('=')[1] : ''; return v === 'wco' || v === 'mac' ? v : ''; })();
 
@@ -42,6 +54,8 @@ const inewsArg = (o) => {
   return out;
 };
 contextBridge.exposeInMainWorld('tfDesktop', {
+  boot: (o) => ipcRenderer.send('tf-boot', { stage: String((o && o.stage) || '').slice(0, 8), login: !!(o && o.login === true), name: String((o && o.name) || '').slice(0, 40), lang: String((o && o.lang) || '').slice(0, 2), tz: String((o && o.tz) || '').slice(0, 40), show: !!(o && o.show === true), err: String((o && o.err) || '').slice(0, 12) }),   /* 1.9.9 (v935) — شاشة البداية · v936 show · err */
+  splashPhotos: (list) => ipcRenderer.invoke('tf-splash-photos', { photos: (Array.isArray(list) ? list.slice(0, 4) : []).map((p) => ({ s: String((p && p.s) || '').slice(0, 8), u: String((p && p.u) || '').slice(0, 400) })) }),   /* v936 — صور الباب لشاشة البداية */
   version: process.versions.electron ? 'electron ' + process.versions.electron : 'electron',
   platform: process.platform,
   chrome: CHROME,   /* 1.4 */
@@ -90,6 +104,7 @@ contextBridge.exposeInMainWorld('tfDesktop', {
   inewsTest: (o) => ipcRenderer.invoke('tf-inews-test', inewsArg(o)),
   inewsStop: () => ipcRenderer.invoke('tf-inews-stop'),
   on: (ch, cb) => {
+    if (ch === 'tf-splash-login' && typeof cb === 'function') { ipcRenderer.on(ch, (e, d) => cb(d)); return true; }   /* v936 — الدخول من شاشة البداية */
     if (ch === 'tf-inews-rundown' && typeof cb === 'function') { ipcRenderer.on(ch, (e, d) => cb(d)); return true; }   /* 1.9.6 (v752) — لقطة iNews: القناة التاسعة باسمها */
     if (!['tf-fs-arrived', 'tf-media-progress', 'tf-media-ready', 'tf-media-failed', 'tf-avid-progress', 'tf-update-state', 'tf-agent-file', 'tf-llm-pull'].includes(ch) || typeof cb !== 'function') return false;
     ipcRenderer.on(ch, (e, d) => cb(d));
@@ -98,3 +113,4 @@ contextBridge.exposeInMainWorld('tfDesktop', {
 });
 /* تعيد { ok } أو { ok:false, error } — والبرنامج (requests.js) يقول النتيجة للمستخدم بلغته */
 contextBridge.exposeInMainWorld('tfOpenPath', (p) => ipcRenderer.invoke('tf-open-path', String(p || '')));
+}

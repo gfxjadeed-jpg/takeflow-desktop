@@ -61,6 +61,11 @@
      بلا تبعيّات · الوضع السلبيّ · قراءةٌ وحدها) كلّ عشر ثوانٍ ويسلّم اللقطة للصفحة (tf-inews-rundown) فتنشرها لباقي الأجهزة.
      الإعداد في config.json (inews) وكلمة المرور مشفّرةٌ بمفتاح النظام (safeStorage) ولا تُعاد للصفحة أبداً. ما يخرج من الجهاز:
      أسماء الطوابير والعناوين وأرقام الصفحات وأرقام المادّة وعدد الكلمات — لا جسم القصّة. tf-inews-set · -state · -test · -stop
+   الغلاف 1.9.9 (v935) — شاشة البداية: نافذةٌ صغيرة (splash.html) تظهر فوراً بلون وقت النهار وتقول الخطوة الجارية (الاتّصال · الصفحة ·
+     حسابك · طلباتك · جاهز) على طريقة Avid، والنافذة الكبيرة لا تظهر إلّا حين تقول الصفحة «جاهز» (tf-boot) — فلا «صفحة فاضية مع أزرار
+     النافذة». لا شبكة: «أعد المحاولة» و«افتح على أيّ حال». و«ابدأ مع تشغيل الجهاز» في أسفلها، معطّلٌ ما لم يُفعَّل
+     v936: صورة وقت النهار من إعدادات «الباب» محفوظةً على الجهاز (tf-splash-photos · من تخزين المحطّة العامّ وحده) · التحيّة من آخر
+     دخول · وصندوق الدخول الصغير في شاشة البداية (الاسم وكلمة المرور تُسلَّم للصفحة كما لو كُتبت فيها)
    الأمان: contextIsolation، لا nodeIntegration، الروابط الخارجيّة في المتصفّح،
    وفتح المسارات مقيّدٌ بشكل مسارٍ محلّيّ/شبكيّ لا رابط. وكلّ قنوات 1.2 من صفحة المحطة وحدها،
    والمعاينة برمزٍ عشوائيّ يصدره الغلاف لملفٍّ بعينه — لا مسار في الرابط.
@@ -148,6 +153,7 @@ function saveState() {
 }
 function showWin() {
   if (!win) { createWindow(); return; }
+  if (bootPending()) { bootShow('user'); return; }   /* 1.9.9 — طُلبت النافذة وشاشة البداية قائمة: تظهر الآن */
   if (win.isMinimized()) win.restore();
   win.show(); win.focus();
 }
@@ -165,16 +171,21 @@ function createWindow() {
     webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false, sandbox: true, devTools: DEVTOOLS, spellcheck: true, backgroundThrottling: !SCREEN,
       additionalArguments: ['--tf-chrome=' + (CHROME ? (process.platform === 'darwin' ? 'mac' : 'wco') : 'off')] },
   }, frame));
+  bootShown = false; bootFailed = false;
+  splashOpen();   /* 1.9.9 — شاشة البداية فوراً (إن كانت مفعّلة) — والنافذة الكبيرة مخفيّة حتّى «جاهز» */
   /* 1.4 — الصفحة تبلّغ شريطها بعد كلّ تحميل؛ صفحةٌ أقدم لا تفعل ← شريط سحبٍ بسيط بعد عشر ثوانٍ */
-  win.webContents.on('did-start-loading', () => { titlebarSeen = false; });
+  win.webContents.on('did-start-loading', () => { titlebarSeen = false; bootFailed = false; splashSend({ stage: 'net' }); });
   win.webContents.on('did-finish-load', () => {
+    /* 1.9.9 — الصفحة وصلت: صفحةٌ أقدم لا تقول «جاهز» ← تظهر بعد عشرين ثانية. صفحة «لا شبكة» (بعد did-fail-load) لا تُعدّ وصولاً */
+    if (!bootFailed) { splashSend({ stage: 'page' }); if (bootPending()) { clearTimeout(bootSoft); bootSoft = setTimeout(() => bootShow('timeout'), SPLASH_WAIT); unrefT(bootSoft); } }
     if (!CHROME) return;
     clearTimeout(titlebarTimer);
     titlebarTimer = setTimeout(() => { if (!titlebarSeen && win && !win.isDestroyed()) titlebarFallback(); }, 10000);
   });
   win.once('ready-to-show', () => {
-    if (st.maximized) win.maximize();
-    if (!START_HIDDEN || SCREEN) win.show();
+    /* 1.9.9 — خلف شاشة البداية: التكبير والإظهار يُؤجَّلان إلى bootShow (التكبير يُظهر نافذةً مخفيّة في ويندوز) */
+    if (st.maximized) { if (bootPending()) win._tfMax = true; else win.maximize(); }
+    if (SCREEN || (!START_HIDDEN && !bootPending())) win.show();
     if (SCREEN) { try { win.setFullScreen(true); } catch (e) {} try { if (screenBlock < 0) screenBlock = powerSaveBlocker.start('prevent-display-sleep'); } catch (e) {} }
     if (CFG.zoom && CFG.zoom !== 1) win.webContents.setZoomFactor(Number(CFG.zoom));
   });
@@ -266,7 +277,7 @@ function createWindow() {
   });
   /* 1.4.1 — انتقلت المحطّة إلى نطاقها الخاصّ: يُحفظ العنوان الجديد فيفتح التطبيق عليه في المرّة التالية */
   win.webContents.on('did-navigate', (ev, url) => { try { rememberAppUrl(url); } catch (e) {} });
-  win.on('closed', () => { win = null; });
+  win.on('closed', () => { win = null; splashClose(); });
   /* 1.9.1 (v717) — تعطّل الصفحة (نفاد الذاكرة · انهيار) يُعاد تحميلها وحدها — ثلاث مرّاتٍ في خمس دقائق حدٌّ أقصى ثمّ صفحة الخطأ */
   const crashes = [];
   win.webContents.on('render-process-gone', (ev, d) => {
@@ -284,6 +295,7 @@ function createWindow() {
   /* لا شبكة عند التشغيل: صفحةٌ تقول ذلك وتعيد المحاولة */
   win.webContents.on('did-fail-load', (ev, code, desc, url, isMain) => {
     if (!isMain || code === -3) return;
+    bootFailed = true; splashSend({ stage: 'fail', code: Number(code) || 0, desc: String(desc || '').slice(0, 80) });   /* 1.9.9 — شاشة البداية تقول ذلك */
     win.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(`<!doctype html><html dir="rtl" lang="ar"><meta charset="utf-8"><body style="font-family:system-ui;background:#0a0e1a;color:#eee;display:grid;place-items:center;height:100vh;margin:0">
       <div style="text-align:center;line-height:2"><b style="font-size:20px">تعذّر الوصول إلى الخادم</b><br>${desc || ''} (${code})<br><span style="opacity:.75">${CFG.url}</span><br><br>
       <button onclick="location.href='${SCREEN ? screenUrl() : CFG.url}'" style="font:inherit;padding:10px 18px;border-radius:10px;border:0;background:#e8a020;color:#1a1305;font-weight:700;cursor:pointer">إعادة المحاولة</button></div></body></html><script>/* 1.9.1 (v717) — يعيد المحاولة وحده: حين تعود الشبكة فوراً، وإلّا كلّ عشرين ثانية */(function(){var u=${JSON.stringify(SCREEN ? screenUrl() : CFG.url)};function go(){location.href=u;}addEventListener('online',go);setTimeout(go,20000);})();</script>`));
@@ -821,6 +833,179 @@ function titlebarFallback() {
   } catch (e) { console.error('titlebar fallback', e.message); }
 }
 
+/* ═══ الغلاف 1.9.9 (v935) — شاشة البداية ═══
+   محمد: «الصفحة فاضية مع أزرار النافذة» عند التشغيل، وتحميلٌ لا يقول ما يجري. الآن نافذةٌ صغيرة (desktop/splash.html) تظهر فوراً
+   بلون وقت النهار وتقول الخطوة الجارية (الاتّصال · الصفحة · حسابك · طلباتك · جاهز) على طريقة Avid، والنافذة الكبيرة تبقى مخفيّةً
+   حتّى تقول الصفحة «جاهز» (tf-boot من صفحة المحطّة وحدها) — أو حتّى يُطلب الدخول فتظهر ليدخل. صفحةٌ أقدم لا تقول شيئاً: تظهر
+   بعد عشرين ثانية من اكتمال التحميل، وفي كلّ حالٍ بعد ٤٥ ثانية. لا شبكة: شاشة البداية تقول ذلك مع «أعد المحاولة» و«افتح على أيّ حال».
+   لا شاشة بداية حين يبدأ مخفيّاً (--hidden) أو على شاشة لوحة الهواء أو بإطار النظام أو بـsplash: false في config.json.
+   «ابدأ مع تشغيل الجهاز» في أسفلها — معطّلٌ ما لم يُفعَّل (كما في القائمة بجانب الساعة)، وأوامرها من نافذتها وحدها. */
+const SPLASH_ON = CHROME && !SCREEN && !START_HIDDEN && CFG.splash !== false;
+const SPLASH_FILE = path.join(__dirname, 'splash.html');
+const SPLASH_WAIT = 20000, SPLASH_MAX = 45000;
+let SPLASH = null, splashLast = {}, bootShown = false, bootFailed = false, bootSoft = null, bootHard = null;
+const unrefT = (t) => { try { if (t && typeof t.unref === 'function') t.unref(); } catch (e) {} };
+function splashOpen() {
+  if (!SPLASH_ON) return false;
+  if (SPLASH && !SPLASH.isDestroyed()) return true;
+  /* v936 — من الجهاز قبل أيّ شبكة: صور الباب المحفوظة والتحيّة واللغة وتوقيت المحطّة من آخر دخول · وتذكّر الاسم إن حُفظ */
+  { const m = splashMeta(); splashLast = { photos: doorPhotos(), name: typeof m.name === 'string' ? m.name : '', lang: m.lang === 'en' ? 'en' : 'ar', tz: typeof m.tz === 'string' ? m.tz : 'Asia/Beirut', login: false }; }
+  try {
+    SPLASH = new BrowserWindow({ width: 560, height: 380, resizable: false, frame: false, show: true, center: true, title: 'TakeFlow TV', backgroundColor: '#0b1030', icon: ICON_WIN,
+      autoHideMenuBar: true, fullscreenable: false, maximizable: false, minimizable: false,
+      webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false, sandbox: true, devTools: DEVTOOLS, additionalArguments: ['--tf-splash'] } });
+    try { SPLASH.setMenuBarVisibility(false); } catch (e) {}
+    SPLASH.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+    SPLASH.webContents.on('will-navigate', (ev) => ev.preventDefault());
+    SPLASH.webContents.on('did-finish-load', () => splashSend({}));   /* ما وصل قبل أن تُرسم يُعاد */
+    SPLASH.on('closed', () => { SPLASH = null; });
+    SPLASH.loadFile(SPLASH_FILE);
+  } catch (e) { console.error('splash', e.message); SPLASH = null; return false; }
+  clearTimeout(bootHard); bootHard = setTimeout(() => bootShow('max'), SPLASH_MAX); unrefT(bootHard);
+  return true;
+}
+/* الحال كاملةً في كلّ مرّة (الشاشة ترسم ما تعرفه): المرحلة · اللغة · توقيت المحطّة · الاسم · الإصدار · «ابدأ مع الجهاز» */
+function splashSend(o) {
+  splashLast = Object.assign({}, splashLast, (o && typeof o === 'object') ? o : {});
+  if (!SPLASH || SPLASH.isDestroyed()) return false;
+  let auto = false; try { auto = !!app.getLoginItemSettings().openAtLogin; } catch (e) {}
+  try { SPLASH.webContents.send('tf-splash-state', Object.assign({}, splashLast, { version: app.getVersion(), autostart: auto })); return true; } catch (e) { return false; }
+}
+function splashClose() { const s = SPLASH; SPLASH = null; try { if (s && !s.isDestroyed()) s.destroy(); } catch (e) {} }
+function bootPending() { return SPLASH_ON && !bootShown && !!win && !win.isDestroyed(); }
+/* النافذة الكبيرة تظهر مرّةً واحدة: جاهز · الدخول مطلوب · مهلة · طلب المستخدم — وشاشة البداية تُغلق */
+function bootShow(why) {
+  clearTimeout(bootSoft); clearTimeout(bootHard); bootSoft = bootHard = null;
+  if (bootShown) return false;
+  bootShown = true;
+  try { if (win && !win.isDestroyed()) { if (win._tfMax) { win._tfMax = false; win.maximize(); } win.show(); win.focus(); } } catch (e) {}
+  splashClose();
+  return true;
+}
+const isSplash = (ev) => !!(SPLASH && !SPLASH.isDestroyed() && ev && ev.sender === SPLASH.webContents);
+const BOOT_STAGES = ['page', 'auth', 'data', 'ready'];
+/* الصفحة تقول أين وصلت — من صفحة المحطّة وحدها؛ «جاهز» يُظهر النافذة، و«الدخول مطلوب» كذلك (v936: صندوق الدخول في شاشة البداية) */
+ipcMain.on('tf-boot', (ev, o) => {
+  if (!fromApp(ev)) return;
+  o = (o && typeof o === 'object') ? o : {};
+  const stage = BOOT_STAGES.includes(o.stage) ? o.stage : '';
+  if (!stage) return;
+  if (BOOT_STAGES.indexOf(stage) < BOOT_STAGES.indexOf(splashLast.stage)) return;   /* لا رجوع إلى خطوةٍ سابقة في التحميل نفسه (إعادة التحميل تبدأ من net) */
+  const st = { stage, busy: false };
+  if (o.lang === 'ar' || o.lang === 'en') st.lang = o.lang;
+  if (typeof o.tz === 'string' && /^[A-Za-z_]+\/[A-Za-z_]+$/.test(o.tz)) st.tz = o.tz;
+  if (typeof o.name === 'string') st.name = o.name.slice(0, 40);
+  /* v936 — صندوق الدخول: الصفحة تطلب الدخول وشاشة البداية قائمة ← يُدخَل منها (والنافذة تبقى مخفيّة) · الخطأ يُقال فيها ·
+     show: الصفحة تحتاج المستخدم (رمز التحقّق · تغيير كلمة المرور) ← تظهر النافذة */
+  if (stage === 'auth' && o.login === true) { st.login = true; st.name = ''; st.err = SPLASH_ERRS.includes(o.err) ? o.err : ''; const c = credSaved(); st.user = c ? c.u : ''; st.saved = !!c; st.keep = credCan(); clearTimeout(loginSafe); }
+  else st.login = false;
+  splashSend(st);
+  if (stage === 'data' || stage === 'ready') { if (st.name) splashMetaSave({ name: st.name, lang: st.lang || 'ar', tz: st.tz || 'Asia/Beirut' }); clearTimeout(loginSafe); }
+  else if (st.login) splashMetaSave({ name: '' });
+  if (stage === 'ready') bootShow('ready');
+  else if (stage === 'auth' && o.show === true) bootShow('page');
+  else if (stage === 'auth' && o.login === true && !(SPLASH && !SPLASH.isDestroyed())) bootShow('login');
+});
+const SPLASH_ERRS = ['bad', 'empty', 'net', 'license'];
+let loginSafe = null;
+/* v936 — صندوق الدخول الصغير: الاسم وكلمة المرور من نافذة شاشة البداية وحدها، تُسلَّم لصفحة المحطّة كما لو كُتبت في بابها.
+   كلمةٌ فارغة مع «محفوظة على هذا الجهاز» ← المحفوظة (تُقرأ هنا ولا تصل شاشة البداية أبداً). لا جواب خلال ١٥ ثانية ← تظهر النافذة */
+function credSaved() {
+  try {
+    if (!credCan() || !fs.existsSync(CRED_FILE())) return null;
+    const c = JSON.parse(safeStorage.decryptString(fs.readFileSync(CRED_FILE())));
+    return c && c.host === new URL(CFG.url).host && c.u && c.p ? { u: String(c.u), p: String(c.p) } : null;
+  } catch (e) { return null; }
+}
+ipcMain.on('tf-splash-login', (ev, o) => {
+  if (!isSplash(ev) || !win || win.isDestroyed() || bootShown) return;
+  let u = String((o && o.u) || '').trim().slice(0, 64), p = String((o && o.p) || '').slice(0, 256);
+  if (!p) { const c = credSaved(); if (c && u && u.toLowerCase() === c.u.toLowerCase()) { u = c.u; p = c.p; } }
+  if (!u || !p) { splashSend({ stage: 'auth', login: true, err: 'empty' }); return; }
+  try { win.webContents.send('tf-splash-login', { u, p, keep: o && o.keep === true }); } catch (e) { bootShow('login'); return; }
+  splashSend({ stage: 'auth', login: false, err: '', busy: true });
+  clearTimeout(loginSafe); loginSafe = setTimeout(() => bootShow('login-wait'), 15000); unrefT(loginSafe);
+});
+
+/* ═══ v936 — صور «الباب» على الجهاز لشاشة البداية ═══
+   الصفحة ترسل روابط صور الأوقات الأربعة (الصباح · الظهر · المساء · الليل) كما في إعدادات الباب، والغلاف ينزّلها مرّةً إلى
+   userData/door ويعيد استعمالها من القرص في كلّ تشغيل — قبل أيّ شبكة. لا يُقبل إلّا مجلّد الباب العامّ في تخزين Supabase
+   (https · *.supabase.co · /storage/v1/object/public/station-door/door/اسم.امتداد) · صورةٌ حقيقيّة (توقيع JPEG أو PNG أو WEBP) ·
+   ٨ ميغابايت حدّاً · بلا تحويل (redirect) · الرابط نفسه لا يُنزَّل ثانيةً · الوقت الذي أُفرغ تُحذف صورته. */
+const DOOR_DIR = () => path.join(app.getPath('userData'), 'door');
+const DOOR_SLOTS = ['am', 'noon', 'pm', 'night'];
+const DOOR_MAX = 8 * 1024 * 1024;
+function doorUrlOk(u) {
+  try {
+    const x = new URL(String(u || ''));
+    if (x.protocol !== 'https:' || x.port || x.username || x.password || x.search || x.hash) return '';
+    if (!/^[a-z0-9-]{1,63}\.supabase\.(?:co|in)$/i.test(x.hostname)) return '';
+    return /^\/storage\/v1\/object\/public\/station-door\/door\/[A-Za-z0-9_-]{1,80}\.(?:jpe?g|webp|png)$/i.test(x.pathname) ? x.href : '';
+  } catch (e) { return ''; }
+}
+function doorKind(b) {
+  if (!b || b.length < 12) return '';
+  if (b[0] === 0xFF && b[1] === 0xD8 && b[2] === 0xFF) return 'jpg';
+  if (b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4E && b[3] === 0x47) return 'png';
+  if (b.slice(0, 4).toString('latin1') === 'RIFF' && b.slice(8, 12).toString('latin1') === 'WEBP') return 'webp';
+  return '';
+}
+function splashMeta() { try { const m = JSON.parse(fs.readFileSync(path.join(DOOR_DIR(), 'splash.json'), 'utf8')); return (m && typeof m === 'object') ? m : {}; } catch (e) { return {}; } }
+function splashMetaSave(o) { try { fs.mkdirSync(DOOR_DIR(), { recursive: true }); fs.writeFileSync(path.join(DOOR_DIR(), 'splash.json'), JSON.stringify(Object.assign(splashMeta(), o))); return true; } catch (e) { return false; } }
+function doorPhotos() {
+  const m = splashMeta(), out = {};
+  for (const s of DOOR_SLOTS) {
+    const f = m.files && m.files[s] && m.files[s].f;
+    if (typeof f === 'string' && new RegExp('^door-' + s + '\\.(?:jpg|png|webp)$').test(f) && fs.existsSync(path.join(DOOR_DIR(), f))) out[s] = require('url').pathToFileURL(path.join(DOOR_DIR(), f)).href;
+  }
+  return out;
+}
+let doorBusy = false;
+ipcMain.handle('tf-splash-photos', async (ev, o) => {
+  if (!fromApp(ev)) return { ok: false, error: 'origin' };
+  if (doorBusy) return { ok: false, error: 'busy' };
+  const want = {};
+  for (const p of (Array.isArray(o && o.photos) ? o.photos.slice(0, 4) : [])) { const sl = String((p && p.s) || ''), u = doorUrlOk(p && p.u); if (DOOR_SLOTS.includes(sl) && u && !want[sl]) want[sl] = u; }
+  doorBusy = true;
+  try {
+    fs.mkdirSync(DOOR_DIR(), { recursive: true });
+    const files = Object.assign({}, splashMeta().files || {}), got = [];
+    for (const sl of DOOR_SLOTS) {
+      const u = want[sl], cur = files[sl];
+      if (!u) { delete files[sl]; continue; }
+      if (cur && cur.u === u && fs.existsSync(path.join(DOOR_DIR(), String(cur.f || '')))) continue;
+      delete files[sl];
+      const ctl = new AbortController(), t = setTimeout(() => ctl.abort(), 20000);
+      try {
+        const r = await fetch(u, { signal: ctl.signal, redirect: 'error' });
+        if (!r || !r.ok || Number((r.headers && r.headers.get && r.headers.get('content-length')) || 0) > DOOR_MAX) continue;
+        const buf = Buffer.from(await r.arrayBuffer()), kind = doorKind(buf);
+        if (!kind || buf.length > DOOR_MAX) continue;
+        const f = 'door-' + sl + '.' + kind, fp = path.join(DOOR_DIR(), f);
+        fs.writeFileSync(fp + '.part', buf); fs.renameSync(fp + '.part', fp);
+        files[sl] = { u, f }; got.push(sl);
+      } catch (e) { /* شبكة أو مهلة: يبقى الوقت بلا صورة */ } finally { clearTimeout(t); }
+    }
+    const used = new Set(Object.values(files).map((x) => x && x.f));
+    for (const n of fs.readdirSync(DOOR_DIR())) if (/^door-/.test(n) && !used.has(n)) { try { fs.rmSync(path.join(DOOR_DIR(), n), { force: true }); } catch (e) {} }
+    splashMetaSave({ files });
+    return { ok: true, slots: Object.keys(files), got };
+  } catch (e) { return { ok: false, error: 'write' }; } finally { doorBusy = false; }
+});
+
+/* أوامر شاشة البداية — من نافذتها وحدها */
+ipcMain.on('tf-splash-cmd', (ev, o) => {
+  if (!isSplash(ev)) return;
+  const c = String((o && o.cmd) || '');
+  if (c === 'retry') { bootFailed = false; clearTimeout(loginSafe); try { if (win && !win.isDestroyed()) win.loadURL(SCREEN ? screenUrl() : CFG.url); } catch (e) {} }
+  else if (c === 'open') bootShow('user');
+  else if (c === 'quit') { quitting = true; app.quit(); }
+  else if (c === 'autostart') {
+    try { app.setLoginItemSettings({ openAtLogin: o && o.on === true, args: ['--hidden'] }); if (tray) tray.setContextMenu(trayMenu()); } catch (e) { console.error('autostart', e.message); }
+    splashSend({});
+  }
+});
+
 /* ═══════════════════════════════════════════════════════════════════
    الغلاف 1.2 (v578) — المسار التلقائيّ · التحقّق · المراقبة · المعاينة · Avid
    TakeFlow Tv - تصميم وتطوير محمد قندقلي
@@ -1098,7 +1283,7 @@ ipcMain.handle('tf-agent-scan', async (ev) => {
   return { ok: true, day, on: AGENT.on, files };
 });
 ipcMain.handle('tf-desk-caps', (ev) => fromApp(ev)
-  ? { v: '1.9.8', pin: true, comfyNet: true, comfyInfo: true, asrModels: true, ctx: true, llm: true, vision: true, comfy: true, asr: asrReady(), sys: true, agentTest: true, oldDir: true, dayStart: true, inews: true, popLock: true, pinSet: true, auto: !!MEDIA.root && PATH_OK.test(MEDIA.root), avid: !!MEDIA.avidWatch && PATH_OK.test(MEDIA.avidWatch), paths: !!CFG.openPaths, version: app.getVersion(), updates: UPD.configured, agent: !CFG.agentPaused, agentOn: AGENT.on, devtools: DEVTOOLS, safePaths: true, screen: SCREEN, pullPause: true, cred: credCan(), gallery: true, dragOut: true }
+  ? { v: '1.9.9', pin: true, comfyNet: true, comfyInfo: true, asrModels: true, ctx: true, llm: true, vision: true, comfy: true, asr: asrReady(), sys: true, agentTest: true, oldDir: true, dayStart: true, inews: true, popLock: true, pinSet: true, splash: SPLASH_ON, boot: true, splashPhotos: true, splashLogin: true, auto: !!MEDIA.root && PATH_OK.test(MEDIA.root), avid: !!MEDIA.avidWatch && PATH_OK.test(MEDIA.avidWatch), paths: !!CFG.openPaths, version: app.getVersion(), updates: UPD.configured, agent: !CFG.agentPaused, agentOn: AGENT.on, devtools: DEVTOOLS, safePaths: true, screen: SCREEN, pullPause: true, cred: credCan(), gallery: true, dragOut: true }
   : {});
 /* 1.9.1 (v715) — «أعد التسمية» من تقرير الاستلام: في المجلّد نفسه وحده داخل جذر المصدر · اسمٌ آمن بلا مسار ولا امتدادٍ آخر ·
    لا يكتب فوق ملفٍّ موجود. الوكيل يرى الاسم الجديد في دورته التالية فيستلمه بقاعدته. */

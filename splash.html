@@ -1,0 +1,195 @@
+<!doctype html>
+<!-- TakeFlow Tv - تصميم وتطوير محمد قندقلي
+     1.9.9 (v935) — شاشة البداية: نافذةٌ صغيرة تظهر فوراً بلون وقت النهار وتقول ما يجري خطوةً خطوة (على طريقة Avid)،
+     والنافذة الكبيرة لا تظهر إلّا والبرنامج جاهز. لا شبكة هنا ولا سكربت خارجيّ: كلّ ما تعرفه يصلها من main.js (tfSplash.on). -->
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src file: data:">
+<title>TakeFlow TV</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body { font-family: 'IBM Plex Sans Arabic', 'Segoe UI', system-ui, sans-serif; font-size: 14px; color: #e9e6ff; background: #0b1030; -webkit-app-region: drag; user-select: none; }
+  button, input, label { -webkit-app-region: no-drag; }
+  .splash { position: relative; height: 100%; display: grid; grid-template-rows: 1fr auto; transition: background 1s; }
+  .splash.am { background: linear-gradient(170deg, #f6b55c 0%, #f3d9a8 55%, #9fc4e8 100%); color: #2a1a05; }
+  .splash.noon { background: linear-gradient(170deg, #3f72c9 0%, #7ea6e6 55%, #dcebfa 100%); color: #0b1630; }
+  .splash.pm { background: linear-gradient(170deg, #2b3a7a 0%, #c0689a 50%, #f2c38a 100%); color: #140a20; }
+  .splash.night { background: linear-gradient(170deg, #0b1030 0%, #1d2457 60%, #3a2f6b 100%); color: #e9e6ff; }
+  .sun { position: absolute; width: 120px; height: 120px; border-radius: 50%; inset-inline-end: 10%; top: 10%; background: radial-gradient(circle, rgba(255,255,255,.85), rgba(255,255,255,0) 70%); opacity: .8; pointer-events: none; }
+  .splash.night .sun { width: 70px; height: 70px; background: radial-gradient(circle at 35% 35%, #fff 0 40%, rgba(255,255,255,0) 72%); }
+  /* v936 — صورة وقت النهار من إعدادات «الباب» (تصل جاهزةً من main.js) */
+  .ph { position: absolute; inset: 0; background-size: cover; background-position: center; opacity: 0; transition: opacity .8s; pointer-events: none; }
+  .ph.on { opacity: 1; }
+  .ph.on + .shade { position: absolute; inset: 0; background: linear-gradient(180deg, rgba(0,0,0,.15), rgba(0,0,0,.55)); pointer-events: none; }
+  .splash.hasph { color: #fff; }
+  .splash.hasph .sun { display: none; }
+  /* v936 — صندوق الدخول الصغير */
+  .lg { display: grid; gap: 7px; width: 270px; text-align: start; }
+  .lg input[type=text], .lg input[type=password] { font: inherit; font-size: 14px; min-height: 36px; padding: 6px 12px; border-radius: 9px; border: 1px solid rgba(255,255,255,.55); background: rgba(255,255,255,.92); color: #14121f; direction: ltr; text-align: start; }
+  .lg input::placeholder { color: #5d5a6e; }
+  .lg input:focus-visible, .btn:focus-visible, .x:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; }
+  .lg .row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  .lg label.k { display: flex; align-items: center; gap: 6px; font-size: 12.5px; cursor: pointer; min-height: 28px; }
+  .lg .row .btn { flex: none; white-space: nowrap; padding-inline: 18px; }
+  .lg label.k span { line-height: 1.3; }
+  .lg .lerr { font-size: 12.5px; font-weight: 600; min-height: 18px; }
+  .lg .lnk { border: 0; background: none; color: inherit; font: inherit; font-size: 12.5px; text-decoration: underline; cursor: pointer; padding: 4px 0; opacity: .9; }
+  .x { position: absolute; z-index: 3; top: 8px; inset-inline-start: 8px; width: 32px; height: 32px; border: 0; border-radius: 8px; background: rgba(0,0,0,.18); color: inherit; font: inherit; font-size: 16px; cursor: pointer; }
+  .x:hover { background: rgba(0,0,0,.3); }
+  .box { position: relative; display: grid; gap: 10px; justify-items: center; align-content: center; padding: 20px 24px 8px; text-align: center; }
+  .logo { font-size: 28px; font-weight: 700; letter-spacing: .01em; direction: ltr; }
+  .greet { font-size: 16px; font-weight: 600; min-height: 22px; }
+  .steps { display: grid; gap: 4px; font-size: 13px; min-width: 250px; text-align: start; }
+  .st { display: flex; align-items: center; gap: 8px; opacity: .55; }
+  .st.on { opacity: 1; font-weight: 600; }
+  .st.ok { opacity: .85; }
+  .st i { width: 14px; height: 14px; border-radius: 50%; border: 2px solid currentColor; display: inline-block; flex: none; }
+  .st.on i { border-top-color: transparent; animation: spin .8s linear infinite; }
+  .st.ok i { background: currentColor; }
+  .bar { width: 260px; height: 5px; border-radius: 3px; background: rgba(127,127,127,.35); }
+  .bar b { display: block; height: 100%; border-radius: 3px; background: currentColor; transition: width .4s; }
+  .err { display: grid; gap: 8px; justify-items: center; }
+  .err b { font-size: 15px; }
+  .err small { opacity: .8; direction: ltr; }
+  .btns { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
+  .btn { border: 0; border-radius: 9px; padding: 8px 14px; min-height: 36px; font: inherit; font-weight: 600; cursor: pointer; background: rgba(255,255,255,.92); color: #1b1a27; }
+  .btn.sec { background: rgba(0,0,0,.2); color: inherit; }
+  .foot { position: relative; display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 12px 8px; font-size: 12px; opacity: .9; }
+  .foot label { display: flex; align-items: center; gap: 6px; cursor: pointer; min-height: 28px; }
+  .foot input { width: 16px; height: 16px; accent-color: currentColor; }
+  .ver { direction: ltr; opacity: .75; }
+  [hidden] { display: none !important; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) { .st.on i { animation: none; } .ph, .splash, .bar b { transition: none; } }
+</style>
+</head>
+<body>
+<div class="splash night" id="sp">
+  <div class="ph" id="ph"></div><div class="shade"></div>
+  <span class="sun" aria-hidden="true"></span>
+  <button class="x" id="x" type="button" aria-label="خروج" title="خروج">&#x2715;</button>
+  <div class="box">
+    <div class="logo">TakeFlow</div>
+    <div class="greet" id="greet"></div>
+    <div id="load">
+      <div class="steps" id="steps" role="status" aria-live="polite"></div>
+      <div class="bar" aria-hidden="true"><b id="bar" style="width:0%"></b></div>
+    </div>
+    <form class="lg" id="lg" hidden novalidate>
+      <input type="text" id="lg-u" autocomplete="username" spellcheck="false" autocapitalize="none" maxlength="64">
+      <input type="password" id="lg-p" autocomplete="current-password" maxlength="256">
+      <div class="lerr" id="lg-e" role="alert"></div>
+      <div class="row"><label class="k" id="lg-kr"><input type="checkbox" id="lg-k"><span id="lg-kt"></span></label><button class="btn" id="lg-go" type="submit"></button></div>
+      <button class="lnk" id="lg-open" type="button"></button>
+    </form>
+    <div class="err" id="err" hidden>
+      <b id="err-t"></b><span id="err-m"></span><small id="err-d"></small>
+      <div class="btns"><button class="btn" id="retry" type="button"></button><button class="btn sec" id="open" type="button"></button></div>
+    </div>
+  </div>
+  <div class="foot">
+    <label><input type="checkbox" id="auto"><span id="auto-t"></span></label>
+    <span class="ver" id="ver"></span>
+  </div>
+</div>
+<script>
+(function () {
+  'use strict';
+  var S = { stage: 'net', fail: null, lang: 'ar', tz: 'Asia/Beirut', name: '', autostart: false, version: '', photos: {}, login: false, err: '', user: '', saved: false, keep: false, busy: false };
+  var SLOTS = ['am', 'noon', 'pm', 'night'];
+  var STEPS = [['net', 'الاتّصال بالخادم', 'Connecting to the server'], ['page', 'تحميل الصفحة', 'Loading the page'], ['auth', 'قراءة حسابك', 'Reading your account'],
+    ['data', 'تحميل طلباتك وبطاقاتك', 'Loading your requests and cards'], ['ready', 'جاهز', 'Ready']];
+  var T = {
+    greet: { am: ['صباح الخير', 'Good morning'], noon: ['نهارك سعيد', 'Good afternoon'], pm: ['مساء الخير', 'Good evening'], night: ['مساء النور', 'Good night'] },
+    fail: ['تعذّر الوصول إلى الخادم', 'The server could not be reached'],
+    failm: ['تأكّد من الشبكة. نعيد المحاولة وحدنا حين تعود.', 'Check the network. We retry by ourselves when it is back.'],
+    retry: ['أعد المحاولة الآن', 'Retry now'], open: ['افتح على أيّ حال', 'Open anyway'],
+    auto: ['ابدأ مع تشغيل الجهاز', 'Start when the computer starts'], ver: ['التطبيق ', 'App '], x: ['خروج', 'Quit'],
+    u: ['اسم المستخدم', 'Username'], p: ['كلمة المرور', 'Password'], ps: ['محفوظة على هذا الجهاز', 'Saved on this computer'], go: ['ادخل', 'Sign in'],
+    keep: ['تذكّرني على هذا الجهاز', 'Remember me on this computer'], lopen: ['افتح البرنامج للدخول بطريقةٍ أخرى', 'Open the app to sign in another way'],
+    e_bad: ['الاسم أو كلمة المرور غير صحيحة — أعد كتابتهما.', 'Wrong username or password — type them again.'], e_empty: ['اكتب الاسم وكلمة المرور.', 'Type your username and password.'],
+    e_net: ['تعذّر الوصول إلى خدمة الدخول — تحقّق من الشبكة وأعد المحاولة.', 'The sign-in service could not be reached — check the network and retry.'],
+    e_license: ['ترخيص المحطّة لا يسمح بالدخول الآن — افتح البرنامج لترى السبب.', 'The station licence does not allow sign-in now — open the app to see why.'] };
+  var $ = function (id) { return document.getElementById(id); };
+  var ar = function () { return S.lang !== 'en'; };
+  var L = function (k) { return T[k][ar() ? 0 : 1]; };
+  /* وقت النهار بتوقيت المحطّة (لا الجهاز): الصباح ٥–١١ · الظهر ١١–١٧ · المساء ١٧–٢١ · الليل */
+  function hourNow() {
+    try { return +new Intl.DateTimeFormat('en-GB', { hour: '2-digit', hourCycle: 'h23', timeZone: S.tz }).formatToParts(new Date()).find(function (p) { return p.type === 'hour'; }).value % 24; }
+    catch (e) { return new Date().getHours(); }
+  }
+  function slotAt(h) { return h >= 5 && h < 11 ? 'am' : h >= 11 && h < 17 ? 'noon' : h >= 17 && h < 21 ? 'pm' : 'night'; }
+  /* صورة الوقت الآن — وإن خلا الوقت فصورة الوقت الذي قبله (دوراناً) كما في باب الدخول */
+  function photoAt(slot) { var i = SLOTS.indexOf(slot); for (var k = 0; k < 4; k++) { var s = SLOTS[(i - k + 4) % 4]; if (S.photos && /^file:\/\//.test(S.photos[s] || '')) return S.photos[s]; } return ''; }
+  function paint() {
+    var slot = slotAt(hourNow()), sp = $('sp'), ph0 = photoAt(slot);
+    document.documentElement.lang = ar() ? 'ar' : 'en'; document.documentElement.dir = ar() ? 'rtl' : 'ltr';
+    sp.className = 'splash ' + slot + (ph0 ? ' hasph' : '');
+    var ph = $('ph'); if (ph0) { ph.style.backgroundImage = 'url("' + ph0.replace(/["\\()]/g, '') + '")'; ph.classList.add('on'); } else { ph.style.backgroundImage = ''; ph.classList.remove('on'); }
+    $('greet').textContent = T.greet[slot][ar() ? 0 : 1] + (S.name ? (ar() ? '، ' : ', ') + S.name : '');
+    var idx = -1; STEPS.forEach(function (s, i) { if (s[0] === S.stage) idx = i; });
+    $('steps').innerHTML = STEPS.map(function (s, i) {
+      var c = i < idx ? 'ok' : (i === idx && !S.fail) ? 'on' : '';
+      return '<div class="st ' + c + '"><i aria-hidden="true"></i><span>' + (ar() ? s[1] : s[2]) + '</span></div>';
+    }).join('');
+    $('bar').style.width = Math.round(Math.max(0, idx) / (STEPS.length - 1) * 100) + '%';
+    var lg = !S.fail && S.login;
+    $('load').hidden = !!S.fail || lg; $('err').hidden = !S.fail; $('lg').hidden = !lg;
+    if (lg) {
+      $('lg-u').placeholder = L('u'); $('lg-p').placeholder = S.saved ? L('ps') : L('p'); $('lg-u').setAttribute('aria-label', L('u')); $('lg-p').setAttribute('aria-label', L('p'));
+      if (!$('lg-u').value && S.user) $('lg-u').value = S.user;
+      $('lg-e').textContent = S.err && T['e_' + S.err] ? L('e_' + S.err) : '';
+      $('lg-kr').hidden = !S.keep; $('lg-kt').textContent = L('keep'); if (S.saved && !$('lg').dataset.k) { $('lg-k').checked = true; $('lg').dataset.k = '1'; }
+      $('lg-go').textContent = L('go'); $('lg-go').disabled = !!S.busy; $('lg-open').textContent = L('lopen');
+      if (!$('lg').dataset.f) { $('lg').dataset.f = '1'; setTimeout(function () { try { ($('lg-u').value ? $('lg-p') : $('lg-u')).focus(); } catch (e) {} }, 30); }
+    }
+    if (S.fail) { $('err-t').textContent = L('fail'); $('err-m').textContent = L('failm'); $('err-d').textContent = String(S.fail.desc || '') + (S.fail.code ? ' (' + S.fail.code + ')' : ''); }
+    $('retry').textContent = L('retry'); $('open').textContent = L('open');
+    $('auto-t').textContent = L('auto'); $('auto').checked = !!S.autostart;
+    $('ver').textContent = S.version ? L('ver') + S.version : '';
+    $('x').title = L('x'); $('x').setAttribute('aria-label', L('x'));
+  }
+  var api = window.tfSplash;
+  function cmd(c, o) { try { if (api && typeof api.cmd === 'function') api.cmd(c, o || {}); } catch (e) {} }
+  $('retry').addEventListener('click', function () { S.fail = null; S.stage = 'net'; paint(); cmd('retry'); });
+  $('open').addEventListener('click', function () { cmd('open'); });
+  $('x').addEventListener('click', function () { cmd('quit'); });
+  $('lg').addEventListener('submit', function (e) {
+    e.preventDefault();
+    var u = $('lg-u').value.trim(), p = $('lg-p').value;
+    if (!u || (!p && !S.saved)) { S.err = 'empty'; paint(); return; }
+    S.err = ''; S.busy = true; S.login = false; S.stage = 'auth'; paint();
+    $('lg-p').value = '';   /* لا تبقى الكلمة في الحقل */
+    try { if (api && typeof api.login === 'function') api.login(u, p, !!$('lg-k').checked); } catch (er) {}
+  });
+  $('lg-open').addEventListener('click', function () { cmd('open'); });
+  $('auto').addEventListener('change', function () { S.autostart = !!$('auto').checked; cmd('autostart', { on: S.autostart }); });
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape') cmd('open'); });
+  if (api && typeof api.on === 'function') api.on(function (d) {
+    d = (d && typeof d === 'object') ? d : {};
+    if (d.lang === 'ar' || d.lang === 'en') S.lang = d.lang;
+    if (typeof d.tz === 'string' && d.tz) S.tz = d.tz;
+    if (typeof d.name === 'string') S.name = d.name;
+    if (typeof d.version === 'string') S.version = d.version;
+    if (typeof d.autostart === 'boolean') S.autostart = d.autostart;
+    if (d.photos && typeof d.photos === 'object') S.photos = d.photos;
+    if (typeof d.login === 'boolean') S.login = d.login;
+    if (typeof d.err === 'string') S.err = d.err;
+    if (typeof d.user === 'string') S.user = d.user;
+    if (typeof d.saved === 'boolean') S.saved = d.saved;
+    if (typeof d.keep === 'boolean') S.keep = d.keep;
+    if (typeof d.busy === 'boolean') S.busy = d.busy;
+    if (d.stage === 'fail') S.fail = { code: d.code, desc: d.desc };
+    else if (typeof d.stage === 'string' && d.stage) { S.stage = d.stage; S.fail = null; }
+    paint();
+  });
+  paint();
+  setInterval(paint, 60000);
+  window.__tfSplashState = function () { return JSON.parse(JSON.stringify(S)); };   /* للفحص وحده (tf-view) */
+})();
+</script>
+</body>
+</html>
