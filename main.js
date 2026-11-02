@@ -851,7 +851,7 @@ function splashOpen() {
   /* v936 — من الجهاز قبل أيّ شبكة: صور الباب المحفوظة والتحيّة واللغة وتوقيت المحطّة من آخر دخول · وتذكّر الاسم إن حُفظ */
   { const m = splashMeta(); splashLast = { photos: doorPhotos(), name: typeof m.name === 'string' ? m.name : '', lang: m.lang === 'en' ? 'en' : 'ar', tz: typeof m.tz === 'string' ? m.tz : 'Asia/Beirut', login: false }; }
   try {
-    SPLASH = new BrowserWindow({ width: 560, height: 380, resizable: false, frame: false, show: true, center: true, title: 'TakeFlow TV', backgroundColor: '#0b1030', icon: ICON_WIN,
+    SPLASH = new BrowserWindow({ width: 880, height: 540, resizable: false, frame: false, show: true, center: true, title: 'TakeFlow TV', backgroundColor: '#0b1030', icon: ICON_WIN,
       autoHideMenuBar: true, fullscreenable: false, maximizable: false, minimizable: false,
       webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false, sandbox: true, devTools: DEVTOOLS, additionalArguments: ['--tf-splash'] } });
     try { SPLASH.setMenuBarVisibility(false); } catch (e) {}
@@ -1286,7 +1286,7 @@ ipcMain.handle('tf-agent-scan', async (ev) => {
   return { ok: true, day, on: AGENT.on, files };
 });
 ipcMain.handle('tf-desk-caps', (ev) => fromApp(ev)
-  ? { v: '1.9.10', pin: true, comfyNet: true, comfyInfo: true, asrModels: true, ctx: true, llm: true, vision: true, comfy: true, asr: asrReady(), sys: true, agentTest: true, oldDir: true, dayStart: true, inews: true, popLock: true, pinSet: true, splash: SPLASH_ON, boot: true, splashPhotos: true, splashLogin: true, auto: !!MEDIA.root && PATH_OK.test(MEDIA.root), avid: !!MEDIA.avidWatch && PATH_OK.test(MEDIA.avidWatch), paths: !!CFG.openPaths, version: app.getVersion(), updates: UPD.configured, agent: !CFG.agentPaused, agentOn: AGENT.on, devtools: DEVTOOLS, safePaths: true, screen: SCREEN, pullPause: true, cred: credCan(), gallery: true, dragOut: true }
+  ? { v: '1.9.11', pin: true, comfyNet: true, comfyInfo: true, asrModels: true, ctx: true, llm: true, vision: true, comfy: true, asr: asrReady(), sys: true, agentTest: true, oldDir: true, dayStart: true, inews: true, popLock: true, pinSet: true, splash: SPLASH_ON, boot: true, splashPhotos: true, splashLogin: true, auto: !!MEDIA.root && PATH_OK.test(MEDIA.root), avid: !!MEDIA.avidWatch && PATH_OK.test(MEDIA.avidWatch), paths: !!CFG.openPaths, version: app.getVersion(), updates: UPD.configured, agent: !CFG.agentPaused, agentOn: AGENT.on, devtools: DEVTOOLS, safePaths: true, screen: SCREEN, pullPause: true, cred: credCan(), gallery: true, dragOut: true }
   : {});
 /* 1.9.1 (v715) — «أعد التسمية» من تقرير الاستلام: في المجلّد نفسه وحده داخل جذر المصدر · اسمٌ آمن بلا مسار ولا امتدادٍ آخر ·
    لا يكتب فوق ملفٍّ موجود. الوكيل يرى الاسم الجديد في دورته التالية فيستلمه بقاعدته. */
