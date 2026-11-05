@@ -965,6 +965,13 @@ function doorPhotos() {
   }
   return out;
 }
+/* 1.9.13 (v991) — محمد: «ما طلعت الصور وقت الدخول». التنزيل كان بشبكة Node (fetch) لا بشبكة Chromium: على شبكة المحطّة (وكيلٌ أو
+   شهاداتٌ من النظام) يفشل بصمت فلا تُحفظ صورة. الآن net.fetch من Electron (شبكة المتصفّح نفسها ووكيل النظام)، وإن لم تكن أو رفضت فـfetch كما كان. */
+function doorFetch(u, o) {
+  let nf = null; try { const n = require('electron').net; if (n && typeof n.fetch === 'function') nf = n.fetch.bind(n); } catch (e) { nf = null; }
+  if (!nf) return fetch(u, o);
+  return Promise.resolve().then(() => nf(u, o)).catch((e) => { if (o && o.signal && o.signal.aborted) throw e; return fetch(u, o); });
+}
 let doorBusy = false;
 ipcMain.handle('tf-splash-photos', async (ev, o) => {
   if (!fromApp(ev)) return { ok: false, error: 'origin' };
@@ -982,7 +989,7 @@ ipcMain.handle('tf-splash-photos', async (ev, o) => {
       delete files[sl];
       const ctl = new AbortController(), t = setTimeout(() => ctl.abort(), 20000);
       try {
-        const r = await fetch(u, { signal: ctl.signal, redirect: 'error' });
+        const r = await doorFetch(u, { signal: ctl.signal, redirect: 'error' });
         if (!r || !r.ok || Number((r.headers && r.headers.get && r.headers.get('content-length')) || 0) > DOOR_MAX) continue;
         const buf = Buffer.from(await r.arrayBuffer()), kind = doorKind(buf);
         if (!kind || buf.length > DOOR_MAX) continue;
@@ -1203,6 +1210,91 @@ ipcMain.handle('tf-agent-read', async (ev, p) => {
   } catch (e) { return { ok: false, error: errOf(e) }; }
 });
 /* الكتابة: داخل وجهةٍ من الإعداد وحده، باسمٍ مؤقّت .tfpart ثمّ إعادة التسمية (لا يلتقط برنامج البثّ نصف صورة) */
+/* ═══ 1.9.14 (v1018) — النسخ الاحتياطيّ اليوميّ: الأدمن يختار مجلّداً مرّةً (محلّيّاً أو على الشبكة)، والبرنامج يكتب فيه
+   كلّ يوم نسخةً مضغوطة باسمٍ واضح: TakeFlow_<المحطّة>_نسخة_YYYY-MM-DD_HHMM.zip — تُكتب مؤقّتاً ثمّ تُعاد قراءتها وتُطابَق
+   بصمتها (SHA-256) قبل أن تأخذ اسمها. التنظيف: آخر نسخةٍ لكلّ يومٍ من ٣٠ يوماً، ولكلّ أسبوعٍ من ١٢ أسبوعاً، ونسخ
+   «قبل الاسترجاع» ٩٠ يوماً. الأسماء والمجلّد من الإعداد وحده — لا مسار من الصفحة. ═══ */
+const BK_RE = /^TakeFlow_[^\\/:*?"<>|\r\n]{1,60}_نسخة_(\d{4})-(\d{2})-(\d{2})_(\d{2})(\d{2})(_قبل-الاسترجاع)?\.zip$/;
+const BK_MAX = 512 * 1024 * 1024;
+function bkDir() { return (CFG.backup && typeof CFG.backup.dir === 'string' && PATH_OK.test(CFG.backup.dir)) ? CFG.backup.dir : ''; }
+function bkSave(patch) {
+  CFG.backup = Object.assign({}, CFG.backup || {}, patch);
+  const f = path.join(app.getPath('userData'), 'config.json');
+  let cur = {};
+  try { cur = JSON.parse(fs.readFileSync(f, 'utf8')); } catch (e) { cur = Object.assign({}, CFG); }
+  cur.backup = CFG.backup;
+  try { fs.writeFileSync(f, JSON.stringify(cur, null, 2)); } catch (e) {}
+}
+async function bkList() {
+  const dir = bkDir(); if (!dir) return [];
+  let names = [];
+  try { names = await within(fs.promises.readdir(dir), 8000); } catch (e) { return []; }
+  const out = [];
+  for (const n of names) {
+    if (!BK_RE.test(n)) continue;
+    try { const st = await within(fs.promises.stat(PX(dir).join(dir, n)), 6000); out.push({ name: n, size: st.size, mtime: st.mtimeMs }); } catch (e) {}
+  }
+  return out.sort((a, b) => b.name.localeCompare(a.name));
+}
+ipcMain.handle('tf-backup-pick', async (ev) => {
+  if (!fromApp(ev)) return { ok: false, error: 'origin' };
+  try {
+    const r = await dialog.showOpenDialog(win && !win.isDestroyed() ? win : undefined, { title: 'مجلّد النسخ الاحتياطيّ', properties: ['openDirectory', 'createDirectory'], defaultPath: bkDir() || undefined });
+    if (!r || r.canceled || !r.filePaths || !r.filePaths[0]) return { ok: false, error: 'canceled' };
+    const v = r.filePaths[0];
+    if (!PATH_OK.test(v)) return { ok: false, error: 'bad_path' };
+    const probe = PX(v).join(v, '.tf-probe-' + crypto.randomBytes(4).toString('hex') + '.tmp');
+    try { await within(fs.promises.writeFile(probe, 'ok'), 8000); await within(fs.promises.unlink(probe), 8000); } catch (e) { return { ok: false, error: errOf(e) }; }   /* يُكتب فيه فعلاً */
+    bkSave({ dir: v });
+    return { ok: true, dir: v };
+  } catch (e) { return { ok: false, error: 'failed' }; }
+});
+ipcMain.handle('tf-backup-state', async (ev) => fromApp(ev) ? { ok: true, dir: bkDir(), auto: !(CFG.backup && CFG.backup.auto === false), files: await bkList() } : { ok: false, error: 'origin' });
+ipcMain.handle('tf-backup-auto', (ev, on) => { if (!fromApp(ev)) return { ok: false, error: 'origin' }; bkSave({ auto: on !== false }); return { ok: true, auto: on !== false }; });
+ipcMain.handle('tf-backup-write', async (ev, o) => {
+  if (!fromApp(ev)) return { ok: false, error: 'origin' };
+  o = o || {};
+  const dir = bkDir(), name = String(o.name || ''), sha = String(o.sha || '');
+  if (!dir) return { ok: false, error: 'no_dir' };
+  if (!BK_RE.test(name) || !/^[0-9a-f]{64}$/.test(sha)) return { ok: false, error: 'bad_name' };
+  const bytes = o.bytes;
+  if (!bytes || typeof bytes.byteLength !== 'number' || bytes.byteLength < 64 || bytes.byteLength > BK_MAX) return { ok: false, error: 'bad_data' };
+  const dest = PX(dir).join(dir, name), tmp = dest + '.tfpart';
+  try {
+    const buf = Buffer.from(bytes.buffer ? new Uint8Array(bytes.buffer, bytes.byteOffset || 0, bytes.byteLength) : bytes);
+    await within(fs.promises.writeFile(tmp, buf), 120000);
+    const back = await within(fs.promises.readFile(tmp), 120000);   /* التحقّق: ما كُتب هو ما أُرسل */
+    const got = crypto.createHash('sha256').update(back).digest('hex');
+    if (got !== sha) { try { await fs.promises.unlink(tmp); } catch (x) {} return { ok: false, error: 'verify_failed' }; }
+    await within(fs.promises.rename(tmp, dest), 8000);
+    bkSave({ last: Date.now(), lastName: name });
+    return { ok: true, out: dest, size: back.length };
+  } catch (e) { try { await fs.promises.unlink(tmp); } catch (x) {} return { ok: false, error: errOf(e) }; }
+});
+ipcMain.handle('tf-backup-read', async (ev, name) => {
+  if (!fromApp(ev)) return { ok: false, error: 'origin' };
+  const dir = bkDir(); name = String(name || '');
+  if (!dir || !BK_RE.test(name)) return { ok: false, error: 'bad_name' };
+  try { const b = await within(fs.promises.readFile(PX(dir).join(dir, name)), 120000); return { ok: true, bytes: new Uint8Array(b) }; }
+  catch (e) { return { ok: false, error: errOf(e) }; }
+});
+ipcMain.handle('tf-backup-prune', async (ev) => {
+  if (!fromApp(ev)) return { ok: false, error: 'origin' };
+  const dir = bkDir(); if (!dir) return { ok: false, error: 'no_dir' };
+  const files = await bkList(), now = Date.now(), keep = new Set(), days = new Set(), weeks = new Set();
+  for (const f of files) {   /* الأحدث أوّلاً */
+    const m = BK_RE.exec(f.name); if (!m) continue;
+    const d = Date.UTC(+m[1], +m[2] - 1, +m[3]), age = (now - d) / 864e5;
+    if (m[6]) { if (age <= 90) keep.add(f.name); continue; }
+    const dk = m[1] + m[2] + m[3], wk = Math.floor((d / 864e5 + 3) / 7);
+    if (age <= 30) { if (!days.has(dk)) { days.add(dk); keep.add(f.name); } continue; }   /* آخر نسخةٍ لكلّ يوم — والباقي من اليوم نفسه يُحذف */
+    if (age <= 84 && !weeks.has(wk)) { weeks.add(wk); keep.add(f.name); }
+  }
+  if (files[0]) keep.add(files[0].name);   /* الأحدث يبقى دائماً */
+  let n = 0;
+  for (const f of files) if (!keep.has(f.name)) { try { await within(fs.promises.unlink(PX(dir).join(dir, f.name)), 8000); n++; } catch (e) {} }
+  return { ok: true, removed: n, kept: keep.size };
+});
 ipcMain.handle('tf-agent-write', async (ev, o) => {
   if (!fromApp(ev)) return { ok: false, error: 'origin' };
   const c = AGENT.cfg; o = o || {};
@@ -1291,7 +1383,7 @@ ipcMain.handle('tf-agent-scan', async (ev) => {
   return { ok: true, day, on: AGENT.on, files };
 });
 ipcMain.handle('tf-desk-caps', (ev) => fromApp(ev)
-  ? { v: '1.9.12', pin: true, comfyNet: true, comfyInfo: true, asrModels: true, ctx: true, llm: true, vision: true, comfy: true, asr: asrReady(), sys: true, agentTest: true, oldDir: true, dayStart: true, inews: true, popLock: true, pinSet: true, splash: SPLASH_ON, boot: true, splashPhotos: true, splashLogin: true, auto: !!MEDIA.root && PATH_OK.test(MEDIA.root), avid: !!MEDIA.avidWatch && PATH_OK.test(MEDIA.avidWatch), paths: !!CFG.openPaths, version: app.getVersion(), updates: UPD.configured, agent: !CFG.agentPaused, agentOn: AGENT.on, devtools: DEVTOOLS, safePaths: true, screen: SCREEN, pullPause: true, cred: credCan(), gallery: true, dragOut: true }
+  ? { v: '1.9.14', pin: true, comfyNet: true, comfyInfo: true, asrModels: true, ctx: true, llm: true, vision: true, comfy: true, asr: asrReady(), sys: true, agentTest: true, oldDir: true, dayStart: true, inews: true, popLock: true, pinSet: true, splash: SPLASH_ON, boot: true, splashPhotos: true, splashLogin: true, auto: !!MEDIA.root && PATH_OK.test(MEDIA.root), avid: !!MEDIA.avidWatch && PATH_OK.test(MEDIA.avidWatch), paths: !!CFG.openPaths, version: app.getVersion(), updates: UPD.configured, agent: !CFG.agentPaused, agentOn: AGENT.on, devtools: DEVTOOLS, safePaths: true, screen: SCREEN, pullPause: true, cred: credCan(), gallery: true, dragOut: true }
   : {});
 /* 1.9.1 (v715) — «أعد التسمية» من تقرير الاستلام: في المجلّد نفسه وحده داخل جذر المصدر · اسمٌ آمن بلا مسار ولا امتدادٍ آخر ·
    لا يكتب فوق ملفٍّ موجود. الوكيل يرى الاسم الجديد في دورته التالية فيستلمه بقاعدته. */
@@ -1334,6 +1426,30 @@ ipcMain.handle('tf-print-pdf', async (ev, o) => {
       n.show();
     } catch (e) {}
     return { ok: true, path: to, name: path.basename(to) };
+  } catch (e) { return { ok: false, error: errOf(e) }; }
+  finally { try { if (pw) pw.destroy(); } catch (e) {} }
+});
+
+/* 1.9.14 (v1025) — الطابعة: قائمة طابعات الجهاز، والطباعة إلى طابعةٍ اختارها صاحبها (بلا نافذة النظام) · الصفحة وحدها */
+ipcMain.handle('tf-printers', async (ev) => {
+  if (!fromApp(ev) || !win || win.isDestroyed()) return { ok: false, error: 'origin' };
+  try { const L = await within(win.webContents.getPrintersAsync(), 8000); return { ok: true, printers: (L || []).map(p => ({ name: String(p.name || ''), label: String(p.displayName || p.name || ''), def: !!p.isDefault })).filter(p => p.name).slice(0, 60) }; }
+  catch (e) { return { ok: false, error: errOf(e) }; }
+});
+ipcMain.handle('tf-print-to', async (ev, o) => {
+  if (!fromApp(ev) || !win || win.isDestroyed()) return { ok: false, error: 'origin' };
+  const html = String((o && o.html) || ''), dev = String((o && o.device) || '').slice(0, 200);
+  if (!html || html.length > 6 * 1024 * 1024) return { ok: false, error: 'bad_doc' };
+  let known = [];
+  try { known = (await within(win.webContents.getPrintersAsync(), 8000) || []).map(p => String(p.name || '')); } catch (e) { known = []; }
+  if (!dev || known.indexOf(dev) < 0) return { ok: false, error: 'no_printer' };   /* اسمٌ من الجهاز نفسه وحده */
+  let pw = null;
+  try {
+    pw = new BrowserWindow({ show: false, width: 900, height: 1200, webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false, javascript: false, images: true } });
+    await within(pw.loadURL('data:text/html;charset=utf-8;base64,' + Buffer.from(html, 'utf8').toString('base64')), 15000);
+    await new Promise((r) => setTimeout(r, 500));
+    const res = await within(new Promise((resolve) => pw.webContents.print({ silent: true, deviceName: dev, printBackground: true }, (ok, why) => resolve({ ok: !!ok, why: String(why || '') }))), 60000);
+    return res.ok ? { ok: true, device: dev } : { ok: false, error: res.why || 'failed' };
   } catch (e) { return { ok: false, error: errOf(e) }; }
   finally { try { if (pw) pw.destroy(); } catch (e) {} }
 });

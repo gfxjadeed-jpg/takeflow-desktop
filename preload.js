@@ -74,6 +74,8 @@ contextBridge.exposeInMainWorld('tfDesktop', {
   fsUnwatch: (id) => ipcRenderer.invoke('tf-fs-unwatch', String(id || '')),
   mediaOpen: (p, o) => ipcRenderer.invoke('tf-media-open', { path: String(p || ''), proxy: !!(o && o.proxy) }),
   printPDF: (html, name) => ipcRenderer.invoke('tf-print-pdf', { html: String(html || ''), name: String(name || '') }),   /* 1.2.1 — PDF بلا نافذة */
+  printers: () => ipcRenderer.invoke('tf-printers'),   /* 1.9.14 (v1025) — طابعات الجهاز */
+  printTo: (html, device) => ipcRenderer.invoke('tf-print-to', { html: String(html || ''), device: String(device || '').slice(0, 200) }),
   avidSend: (p, o) => ipcRenderer.invoke('tf-avid-send', { path: String(p || ''), ref: String((o && o.ref) || ''), title: String((o && o.title) || ''), id: String((o && o.id) || '') }),
   updateCheck: () => ipcRenderer.invoke('tf-update-check'),      /* 1.3 — التحديث */
   updateState: () => ipcRenderer.invoke('tf-update-state'),
@@ -103,6 +105,15 @@ contextBridge.exposeInMainWorld('tfDesktop', {
   inewsState: () => ipcRenderer.invoke('tf-inews-state'),
   inewsTest: (o) => ipcRenderer.invoke('tf-inews-test', inewsArg(o)),
   inewsStop: () => ipcRenderer.invoke('tf-inews-stop'),
+  /* 1.9.14 (v1018) — النسخ الاحتياطيّ اليوميّ إلى مجلّد الأدمن */
+  backup: {
+    pick: () => ipcRenderer.invoke('tf-backup-pick'),
+    state: () => ipcRenderer.invoke('tf-backup-state'),
+    auto: (on) => ipcRenderer.invoke('tf-backup-auto', on !== false),
+    write: (o) => ipcRenderer.invoke('tf-backup-write', { name: String((o && o.name) || '').slice(0, 160), sha: String((o && o.sha) || '').slice(0, 64), bytes: o && o.bytes }),
+    read: (n) => ipcRenderer.invoke('tf-backup-read', String(n || '').slice(0, 160)),
+    prune: () => ipcRenderer.invoke('tf-backup-prune'),
+  },
   on: (ch, cb) => {
     if ((ch === 'tf-splash-login' || ch === 'tf-splash-lang') && typeof cb === 'function') { ipcRenderer.on(ch, (e, d) => cb(d)); return true; }   /* 1.9.10 — واللغة من شاشة البداية */   /* v936 — الدخول من شاشة البداية */
     if (ch === 'tf-inews-rundown' && typeof cb === 'function') { ipcRenderer.on(ch, (e, d) => cb(d)); return true; }   /* 1.9.6 (v752) — لقطة iNews: القناة التاسعة باسمها */

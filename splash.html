@@ -54,6 +54,7 @@
   .bar b { position: absolute; inset-block: 0; inset-inline-start: 0; min-width: 12px; border-radius: 3px; background: var(--acc); transition: width .5s ease; }
   .bar b::after { content: ''; position: absolute; inset: 0; background: linear-gradient(90deg, transparent, rgba(255,255,255,.55), transparent); transform: translateX(-100%); animation: shine 1.4s ease-in-out infinite; }
   .pct { font-size: 12.5px; font-weight: 700; direction: ltr; min-width: 38px; text-align: end; color: var(--ink2); }
+  .now { font-size: 12.5px; color: var(--ink2); min-height: 18px; margin-top: 8px; }
   .slow { display: grid; gap: 8px; padding: 10px 12px; border-radius: 12px; background: rgba(255,255,255,.08); border: 1px solid var(--edge); font-size: 12.5px; line-height: 1.6; color: var(--ink2); }
   /* الدخول */
   .lg { display: grid; gap: 10px; }
@@ -109,6 +110,7 @@
       <div id="load">
         <div class="steps" id="steps" role="status" aria-live="polite"></div>
         <div class="meter"><div class="bar" aria-hidden="true"><b id="bar" style="width:0%"></b></div><span class="pct" id="pct"></span></div>
+        <div class="now" id="now"></div>
         <div class="slow" id="slow" hidden><span id="slow-t"></span><div class="btns"><button class="btn sec" id="slow-open" type="button"></button></div></div>
       </div>
       <form class="lg" id="lg" hidden novalidate>
@@ -169,13 +171,15 @@
     document.documentElement.lang = ar() ? 'ar' : 'en'; document.documentElement.dir = ar() ? 'rtl' : 'ltr';
     sp.className = 'splash ' + slot + (ph0 ? ' hasph' : '');
     var ph = $('ph'); if (ph0) { ph.style.backgroundImage = 'url("' + ph0.replace(/["\\()]/g, '') + '")'; ph.classList.add('on'); } else { ph.style.backgroundImage = ''; ph.classList.remove('on'); }
-    $('greet').textContent = T.greet[slot][ar() ? 0 : 1] + (S.name ? (ar() ? '، ' : ', ') + S.name : '');
+    /* 1.9.13 (v991) — الاسم جزيرةٌ باتّجاهه (عربيٌّ في شاشةٍ إنكليزيّة لا يقلب الفاصلة) · وتحت الشريط ما يجري الآن بكلمته */
+    $('greet').textContent = T.greet[slot][ar() ? 0 : 1] + (S.name ? (ar() ? '، ' : ', ') + '\u2068' + S.name + '\u2069' : '');
     var idx = -1; STEPS.forEach(function (s, i) { if (s[0] === S.stage) idx = i; });
     $('steps').innerHTML = STEPS.map(function (s, i) {
       var c = i < idx ? 'ok' : (i === idx && !S.fail) ? 'on' : '';
       return '<div class="st ' + c + '"><i aria-hidden="true"></i><span>' + (ar() ? s[1] : s[2]) + '</span></div>';
     }).join('');
     var pc = Math.round(Math.max(0, idx) / (STEPS.length - 1) * 100); $('bar').style.width = pc + '%'; $('pct').textContent = pc + '%';
+    var cur = idx >= 0 ? STEPS[idx] : null; $('now').textContent = cur ? (ar() ? cur[1] : cur[2]) + (idx < STEPS.length - 1 ? '…' : '') : '';
     var slow = !S.fail && !S.login && S.stage !== 'ready' && Date.now() - stageAt > SLOW_MS;
     $('slow').hidden = !slow; $('slow-t').textContent = L('slow'); $('slow-open').textContent = L('open');
     clock();
