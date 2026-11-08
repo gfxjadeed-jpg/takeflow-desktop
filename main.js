@@ -1129,7 +1129,8 @@ async function agTick() {
     if (day !== AGENT.day) { AGENT.day = day; AGENT.seen.clear(); }
     /* 1.5.0 — مجلّدات اليوم مع بداية يوم البثّ ومع كلّ إعدادٍ جديد (جذرٌ أو مشهدٌ أُضيف في منتصف اليوم) — مرّةً لكلّ حال */
     const mk = day + '|' + c.src + '|' + c.srcPattern + '|' + c.segments.map((s) => s.dir).join('|');
-    if (mk !== AGENT.mk) { AGENT.mk = mk; await agMkDay(c, day); }
+    /* 1.9.15 (v1111) — ما تعذّر إنشاؤه (الشبكة انقطعت مع بداية اليوم) يُعاد كلّ دقيقة حتّى ينجح — كان مرّةً واحدة فيبقى اليوم بلا مجلّدات */
+    if (mk !== AGENT.mk && Date.now() >= (AGENT.mkAt || 0)) { const bad = await agMkDay(c, day); if (bad) AGENT.mkAt = Date.now() + 60000; else { AGENT.mk = mk; AGENT.mkAt = 0; } }
     for (const sg of c.segments) {
       const dir = agJoin(c.src, agFill(c.srcPattern, { day, segment: sg.dir }));
       let names = [];
@@ -1156,11 +1157,13 @@ async function agTick() {
 /* 1.5.0 — مجلّد اليوم ومجلّد كلّ مشهد يُنشآن وحدهما مع بداية يوم البثّ — داخل جذر المصدر وحده، وما يتعذّر يُترك
    (مصدرٌ للقراءة وحدها على الشبكة لا يوقف المراقبة) */
 async function agMkDay(c, day) {
+  let bad = 0;
   for (const sg of c.segments) {
     const dir = agJoin(c.src, agFill(c.srcPattern, { day, segment: sg.dir }));
     if (!agInside(c.src, dir)) continue;
-    try { await within(fs.promises.mkdir(dir, { recursive: true }), 6000); } catch (e) {}
+    try { await within(fs.promises.mkdir(dir, { recursive: true }), 6000); } catch (e) { bad++; }
   }
+  return bad;   /* 1.9.15 — كم تعذّر */
 }
 function agStart(cfg) {
   AGENT.cfg = cfg; AGENT.on = true;
@@ -1383,7 +1386,7 @@ ipcMain.handle('tf-agent-scan', async (ev) => {
   return { ok: true, day, on: AGENT.on, files };
 });
 ipcMain.handle('tf-desk-caps', (ev) => fromApp(ev)
-  ? { v: '1.9.14', pin: true, comfyNet: true, comfyInfo: true, asrModels: true, ctx: true, llm: true, vision: true, comfy: true, asr: asrReady(), sys: true, agentTest: true, oldDir: true, dayStart: true, inews: true, popLock: true, pinSet: true, splash: SPLASH_ON, boot: true, splashPhotos: true, splashLogin: true, auto: !!MEDIA.root && PATH_OK.test(MEDIA.root), avid: !!MEDIA.avidWatch && PATH_OK.test(MEDIA.avidWatch), paths: !!CFG.openPaths, version: app.getVersion(), updates: UPD.configured, agent: !CFG.agentPaused, agentOn: AGENT.on, devtools: DEVTOOLS, safePaths: true, screen: SCREEN, pullPause: true, cred: credCan(), gallery: true, dragOut: true }
+  ? { v: '1.9.15', pin: true, comfyNet: true, comfyInfo: true, asrModels: true, ctx: true, llm: true, vision: true, comfy: true, asr: asrReady(), sys: true, agentTest: true, oldDir: true, dayStart: true, llmImport: true, llmCpu: true, inews: true, popLock: true, pinSet: true, splash: SPLASH_ON, boot: true, splashPhotos: true, splashLogin: true, auto: !!MEDIA.root && PATH_OK.test(MEDIA.root), avid: !!MEDIA.avidWatch && PATH_OK.test(MEDIA.avidWatch), paths: !!CFG.openPaths, version: app.getVersion(), updates: UPD.configured, agent: !CFG.agentPaused, agentOn: AGENT.on, devtools: DEVTOOLS, safePaths: true, screen: SCREEN, pullPause: true, cred: credCan(), gallery: true, dragOut: true }
   : {});
 /* 1.9.1 (v715) — «أعد التسمية» من تقرير الاستلام: في المجلّد نفسه وحده داخل جذر المصدر · اسمٌ آمن بلا مسار ولا امتدادٍ آخر ·
    لا يكتب فوق ملفٍّ موجود. الوكيل يرى الاسم الجديد في دورته التالية فيستلمه بقاعدته. */
@@ -1765,7 +1768,10 @@ ipcMain.handle('tf-llm', async (ev, o) => {
       if (imgs.length > 3 || imgs.some((x) => typeof x !== 'string' || !x || x.length > LLM_IMG_MAX || !/^[A-Za-z0-9+/]+={0,2}$/.test(x))) return { ok: false, error: 'bad_image' };
       const temp = Math.max(0, Math.min(1, Number.isFinite(Number(o && o.temp)) ? Number(o.temp) : 0.3));
       const t0 = Date.now();
-      const r = await llmFetch('/api/generate', llmJSON({ model, prompt, system: system || undefined, ...(imgs.length ? { images: imgs } : {}), stream: false, think: false, options: { temperature: temp, num_ctx: llmCtx(prompt.length + system.length) } }), imgs.length ? 300000 : 180000);
+      /* 1.9.15 (v1111) — المساعد المحلّيّ: cpu يشغّله على المعالج وحده (num_gpu 0 — كرت الشاشة يبقى للتصميم) · max سقف الكلمات · ms مهلةٌ قصيرة (٢–١٨٠ ثانية) */
+      const cpu = !!(o && o.cpu), max = Math.max(0, Math.min(2048, Math.floor(Number(o && o.max) || 0))), ms = Number(o && o.ms) > 0 ? Math.max(2000, Math.min(180000, Math.floor(Number(o.ms)))) : 0;
+      const r = await llmFetch('/api/generate', llmJSON({ model, prompt, system: system || undefined, ...(imgs.length ? { images: imgs } : {}), stream: false, think: false,
+        options: Object.assign({ temperature: temp, num_ctx: llmCtx(prompt.length + system.length) }, cpu ? { num_gpu: 0 } : {}, max ? { num_predict: max } : {}) }), ms || (imgs.length ? 300000 : 180000));
       const j = await r.json().catch(() => ({}));
       if (!r.ok) return { ok: false, error: /newer version/i.test(String(j.error || '')) ? 'old_ollama' : /not found|pull/i.test(String(j.error || '')) ? 'no_model' : 'failed' };   /* 1.9.4 */
       const text = String(j.response || '').replace(/<think>[\s\S]*?<\/think>/g, '').trim();
@@ -1816,6 +1822,63 @@ ipcMain.handle('tf-llm', async (ev, o) => {
     }
     return { ok: false, error: 'bad_op' };
   } catch (e) { return { ok: false, error: llmErr(e) }; }
+});
+
+/* ═══ 1.9.15 (v1111) — المساعد المحلّيّ من ملفّ GGUF: «اختر ملفّ النموذج» بلا تنزيلٍ من الإنترنت ═══
+   محمد: «بعطيه باص بالبرنامج إنو اشتغل على هيدا الموديل المحلّي». صاحب الجهاز يختار الملفّ من نافذة النظام (الصفحة لا تكتب مساراً)،
+   فيُفحص (امتداد .gguf · يبدأ بـGGUF · ٥٠ م.ب – ٦٤ غ.ب) ثمّ يُحسب بصمته (sha256) ويُنسخ إلى Ollama على هذا الجهاز (/api/blobs — يُتخطّى
+   إن كان عنده) ويُنشأ النموذج باسمٍ صالح (/api/create) — لا سطر أوامر ولا شبكة خارجيّة. التقدّم حدث tf-llm-pull (op: import) · واحدٌ في كلّ مرّة. */
+const LLM_IMP = { busy: false, min: 50 * 1048576, max: 64 * 1073741824 };
+ipcMain.handle('tf-llm-import', async (ev, o) => {
+  if (!fromApp(ev)) return { ok: false, error: 'origin' };
+  const model = String((o && o.model) || '').trim().toLowerCase();
+  if (!LLM_NAME.test(model)) return { ok: false, error: 'bad_model' };
+  if (LLM_IMP.busy || LLM.pulls.size) return { ok: false, error: 'busy' };
+  try { const v = await llmFetch('/api/version', {}, 2500); if (!v.ok) return { ok: false, error: 'off' }; } catch (e) { return { ok: false, error: llmErr(e) }; }
+  let file = '';
+  try {
+    const r = await dialog.showOpenDialog(win && !win.isDestroyed() ? win : undefined, { title: 'ملفّ النموذج (GGUF)', properties: ['openFile'], filters: [{ name: 'GGUF', extensions: ['gguf'] }] });
+    if (!r || r.canceled || !r.filePaths || !r.filePaths[0]) return { ok: false, error: 'canceled' };
+    file = String(r.filePaths[0]);
+  } catch (e) { return { ok: false, error: 'dialog' }; }
+  if (!/\.gguf$/i.test(file)) return { ok: false, error: 'bad_file' };
+  let st;
+  try {
+    st = await fs.promises.stat(file);
+    if (!st.isFile() || st.size < LLM_IMP.min || st.size > LLM_IMP.max) return { ok: false, error: 'bad_file' };
+    const fh = await fs.promises.open(file, 'r'), b = Buffer.alloc(4);
+    try { await fh.read(b, 0, 4, 0); } finally { await fh.close(); }
+    if (b.toString('latin1') !== 'GGUF') return { ok: false, error: 'bad_file' };
+  } catch (e) { return { ok: false, error: 'bad_file' }; }
+  const wc = ev.sender, send = (d) => { try { if (wc && !wc.isDestroyed()) wc.send('tf-llm-pull', Object.assign({ model, op: 'import' }, d)); } catch (e) {} };
+  LLM_IMP.busy = true;
+  (async () => {
+    try {
+      const h = crypto.createHash('sha256'); let n = 0, last = -1;
+      await new Promise((res, rej) => {
+        const s = fs.createReadStream(file, { highWaterMark: 4 << 20 });
+        s.on('data', (c) => { h.update(c); n += c.length; const p = Math.floor(n / st.size * 40); if (p !== last) { last = p; send({ status: 'importing', step: 'hash', pct: p }); } });
+        s.on('end', res); s.on('error', rej);
+      });
+      const digest = 'sha256:' + h.digest('hex');
+      let have = false;
+      try { const r = await llmFetch('/api/blobs/' + digest, { method: 'HEAD' }, 5000); have = r.ok; } catch (e) { have = false; }
+      if (!have) {
+        let m = 0; last = -1;
+        const s = fs.createReadStream(file, { highWaterMark: 4 << 20 });
+        s.on('data', (c) => { m += c.length; const p = 40 + Math.floor(m / st.size * 50); if (p !== last) { last = p; send({ status: 'importing', step: 'copy', pct: p }); } });
+        const r = await fetch(LLM.base + '/api/blobs/' + digest, { method: 'POST', body: s, duplex: 'half' });
+        if (!r.ok) throw Object.assign(new Error('blob'), { code: 'failed' });
+      }
+      send({ status: 'importing', step: 'create', pct: 92 });
+      const r = await fetch(LLM.base + '/api/create', llmJSON({ model, files: { 'model.gguf': digest }, stream: false }));
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok || j.error) throw Object.assign(new Error('create'), { code: /newer version|unknown|files|modelfile/i.test(String(j.error || '')) ? 'old_ollama' : 'failed' });
+      send({ status: 'success', pct: 100 });
+    } catch (e) { send({ status: 'error', error: e && (e.code === 'old_ollama' || e.code === 'failed') ? e.code : llmErr(e) }); }
+    finally { LLM_IMP.busy = false; }
+  })();
+  return { ok: true, started: true, file: path.basename(file).slice(0, 120), size: st.size };
 });
 
 /* ═══ 1.8.0 (v693) — جسر ComfyUI: توليد الصور على هذا الجهاز ═══
