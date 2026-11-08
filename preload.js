@@ -92,6 +92,7 @@ contextBridge.exposeInMainWorld('tfDesktop', {
   /* 1.6.0 — جهاز المحطّة: الذكاء المحلّيّ (Ollama) · التفريغ (whisper.cpp) · الجهاز */
   llm: (o) => ipcRenderer.invoke('tf-llm', { op: String((o && o.op) || ''), model: String((o && o.model) || ''), prompt: String((o && o.prompt) || ''), system: String((o && o.system) || ''), temp: Number(o && o.temp),
     images: Array.isArray(o && o.images) ? o.images.slice(0, 3).map(String) : [], cpu: !!(o && o.cpu), max: Number(o && o.max) || 0, ms: Number(o && o.ms) || 0 }),   /* 1.7.0 — الرؤية · 1.9.15 — المساعد: المعالج وحده · سقف · مهلة */
+  agentOldClean: () => ipcRenderer.invoke('tf-agent-oldclean'),   /* 1.9.16 (v1117) — نظّف _old الآن */
   llmImport: (model) => ipcRenderer.invoke('tf-llm-import', { model: String(model || '') }),   /* 1.9.15 (v1111) — النموذج من ملفّ GGUF يختاره صاحب الجهاز */
   vision: true,   /* 1.7.0 */
   comfy: (o) => ipcRenderer.invoke('tf-comfy', { op: String((o && o.op) || ''), workflow: o && o.workflow, timeoutMs: Number(o && o.timeoutMs) || 0, url: String((o && o.url) || '').slice(0, 200) }),   /* 1.8.0 — ComfyUI على الجهاز · 1.9.0 url */

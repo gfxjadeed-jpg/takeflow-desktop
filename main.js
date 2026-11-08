@@ -1097,13 +1097,14 @@ function agValid(c) {
   const want = Array.isArray(mine.segs) ? mine.segs.map(String) : [];
   const segments = (Array.isArray(c.segments) ? c.segments : []).slice(0, 20).map((s) => ({ id: seg(s.id, 20), name: seg(s.name, 40), dir: seg(s.dir || s.name, 60) }))
     .filter((s) => s.id && s.dir && (!want.length || want.includes(s.id)));
-  const dests = (Array.isArray(c.dests) ? c.dests : []).slice(0, 12).map((d) => ({ id: seg(d.id, 20), name: seg(d.name, 40), path: String(d.path || ''),
+  const dests = (Array.isArray(c.dests) ? c.dests : []).slice(0, 60).map((d) => ({ id: seg(d.id, 20), name: seg(d.name, 40), path: String(d.path || ''),
     sizes: (Array.isArray(d.sizes) ? d.sizes : []).map(String), segs: (Array.isArray(d.segs) ? d.segs : []).map(String) })).filter((d) => d.id && d.name && PATH_OK.test(d.path));
   if (!sizes.length || !segments.length) return null;
   const pat = (v, def) => (/^[^:*?"<>|]{1,120}$/.test(String(v || '')) && !/\.\./.test(String(v)) ? String(v) : def);
   const dsh = Math.round(Number(c.dayStart));   /* 1.5.0 — ساعة بدء يوم البثّ (٠–١٢) — بلاها منتصف الليل كما كان */
   return { src, custom: src !== String(c.src || ''), sizes, segments, dests, dayFmt: String(c.dayFmt || 'YYYY-MM-DD'), dayStart: Number.isInteger(dsh) && dsh >= 0 && dsh <= 12 ? dsh : 0,
-    srcPattern: pat(c.srcPattern, '{day}\\{segment}'), outPattern: pat(c.outPattern, '{day}\\{bulletin}\\{segment}\\{size}'), filePattern: pat(c.filePattern, '{bulletin}_{segment}_{n}_{size}') };
+    srcPattern: pat(c.srcPattern, '{day}\\{segment}'), outPattern: pat(c.outPattern, '{day}\\{bulletin}\\{segment}\\{size}'), filePattern: pat(c.filePattern, '{bulletin}_{segment}_{n}_{size}'),
+    oldKeep: [1, 3, 7, 14, 30].includes(Math.round(Number(c.oldKeep))) ? Math.round(Number(c.oldKeep)) : 7 };   /* 1.9.16 (v1117) — كم يوماً تبقى النسخ السابقة في _old */
 }
 /* داخل الجذر فعلاً: المسار المطبَّع يبدأ بالجذر وفاصلٍ — لا «..» ولا جذرٌ يشبهه («\\NEWS\gfx2» ليس داخل «\\NEWS\gfx») */
 function agInside(root, p) {
@@ -1121,8 +1122,30 @@ function agEmit(e) {
   AGENT.found.unshift(e); if (AGENT.found.length > 60) AGENT.found.length = 60; AGENT.n++;
   try { if (win && !win.isDestroyed()) win.webContents.send('tf-agent-file', e); } catch (x) {}
 }
+/* ═══ 1.9.16 (v1117) — تنظيف _old: النسخ السابقة (base_YYYYMMDD-HHMMSS.ext — ما يكتبه الوكيل وحده) الأقدم من oldKeep يوماً تُحذف
+   من _old في كلّ وجهةٍ مُعلنة — مرّةً كلّ ستّ ساعات. ملفٌّ لا يطابق ختم الوكيل لا يُمسّ، ولا مجلّدٌ خارج الوجهات. ═══ */
+const AG_OLD_RE = /_\d{8}-\d{6}\.[A-Za-z0-9]{1,5}$/;
+async function agOldClean(force) {
+  const c = AGENT.cfg; if (!c || !Array.isArray(c.dests)) return { ok: false, n: 0 };
+  if (!force && AGENT.oldAt && Date.now() - AGENT.oldAt < 6 * 3600000) return { ok: true, n: 0, skipped: true };
+  AGENT.oldAt = Date.now();
+  const keep = (c.oldKeep || 7) * 86400000, now = Date.now(); let n = 0;
+  for (const d of c.dests) {
+    const od = PX(d.path).join(d.path, '_old');
+    let names = []; try { names = await within(fs.promises.readdir(od), 6000); } catch (e) { continue; }
+    for (const nm of names.slice(0, 2000)) {
+      if (!AG_OLD_RE.test(nm)) continue;
+      const f = PX(od).join(od, nm);
+      try { const st = await within(fs.promises.stat(f), 6000); if (st.isFile() && now - st.mtimeMs > keep) { await within(fs.promises.unlink(f), 6000); n++; } } catch (e) {}
+    }
+  }
+  AGENT.oldN = (AGENT.oldN || 0) + n;
+  return { ok: true, n };
+}
+ipcMain.handle('tf-agent-oldclean', async (ev) => fromApp(ev) ? await agOldClean(true) : { ok: false, error: 'origin' });
 async function agTick() {
   if (!AGENT.on || !AGENT.cfg || AGENT.busy) return;
+  agOldClean(false).catch(() => {});   /* 1.9.16 */
   AGENT.busy = true;
   try {
     const c = AGENT.cfg, day = agDay(c.dayFmt, null, c.dayStart);
@@ -1386,7 +1409,7 @@ ipcMain.handle('tf-agent-scan', async (ev) => {
   return { ok: true, day, on: AGENT.on, files };
 });
 ipcMain.handle('tf-desk-caps', (ev) => fromApp(ev)
-  ? { v: '1.9.15', pin: true, comfyNet: true, comfyInfo: true, asrModels: true, ctx: true, llm: true, vision: true, comfy: true, asr: asrReady(), sys: true, agentTest: true, oldDir: true, dayStart: true, llmImport: true, llmCpu: true, inews: true, popLock: true, pinSet: true, splash: SPLASH_ON, boot: true, splashPhotos: true, splashLogin: true, auto: !!MEDIA.root && PATH_OK.test(MEDIA.root), avid: !!MEDIA.avidWatch && PATH_OK.test(MEDIA.avidWatch), paths: !!CFG.openPaths, version: app.getVersion(), updates: UPD.configured, agent: !CFG.agentPaused, agentOn: AGENT.on, devtools: DEVTOOLS, safePaths: true, screen: SCREEN, pullPause: true, cred: credCan(), gallery: true, dragOut: true }
+  ? { v: '1.9.16', pin: true, comfyNet: true, comfyInfo: true, asrModels: true, ctx: true, llm: true, vision: true, comfy: true, asr: asrReady(), sys: true, agentTest: true, oldDir: true, dayStart: true, llmImport: true, llmCpu: true, oldClean: true, inews: true, popLock: true, pinSet: true, splash: SPLASH_ON, boot: true, splashPhotos: true, splashLogin: true, auto: !!MEDIA.root && PATH_OK.test(MEDIA.root), avid: !!MEDIA.avidWatch && PATH_OK.test(MEDIA.avidWatch), paths: !!CFG.openPaths, version: app.getVersion(), updates: UPD.configured, agent: !CFG.agentPaused, agentOn: AGENT.on, devtools: DEVTOOLS, safePaths: true, screen: SCREEN, pullPause: true, cred: credCan(), gallery: true, dragOut: true }
   : {});
 /* 1.9.1 (v715) — «أعد التسمية» من تقرير الاستلام: في المجلّد نفسه وحده داخل جذر المصدر · اسمٌ آمن بلا مسار ولا امتدادٍ آخر ·
    لا يكتب فوق ملفٍّ موجود. الوكيل يرى الاسم الجديد في دورته التالية فيستلمه بقاعدته. */
