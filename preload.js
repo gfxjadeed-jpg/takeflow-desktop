@@ -115,6 +115,7 @@ contextBridge.exposeInMainWorld('tfDesktop', {
     write: (o) => ipcRenderer.invoke('tf-backup-write', { name: String((o && o.name) || '').slice(0, 160), sha: String((o && o.sha) || '').slice(0, 64), bytes: o && o.bytes }),
     read: (n) => ipcRenderer.invoke('tf-backup-read', String(n || '').slice(0, 160)),
     prune: () => ipcRenderer.invoke('tf-backup-prune'),
+    mirror: (op) => ipcRenderer.invoke('tf-backup-mirror', op === 'clear' ? 'clear' : 'pick'),   /* 1.9.17 — المجلّد الثاني */
   },
   on: (ch, cb) => {
     if ((ch === 'tf-splash-login' || ch === 'tf-splash-lang') && typeof cb === 'function') { ipcRenderer.on(ch, (e, d) => cb(d)); return true; }   /* 1.9.10 — واللغة من شاشة البداية */   /* v936 — الدخول من شاشة البداية */

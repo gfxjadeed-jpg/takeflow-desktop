@@ -1243,6 +1243,10 @@ ipcMain.handle('tf-agent-read', async (ev, p) => {
 const BK_RE = /^TakeFlow_[^\\/:*?"<>|\r\n]{1,60}_نسخة_(\d{4})-(\d{2})-(\d{2})_(\d{2})(\d{2})(_قبل-الاسترجاع)?\.zip$/;
 const BK_MAX = 512 * 1024 * 1024;
 function bkDir() { return (CFG.backup && typeof CFG.backup.dir === 'string' && PATH_OK.test(CFG.backup.dir)) ? CFG.backup.dir : ''; }
+/* 1.9.17 (v1144) — النسخة الثانية (المرآة): مجلّدٌ ثانٍ يختاره الأدمن (قرصٌ آخر أو مجلّد شبكة). كلّ نسخةٍ تُكتب في الأوّل
+   ثمّ تُنسخ إليه بالطريقة نفسها: اسمٌ مؤقّت ثمّ قراءةٌ ومطابقة البصمة ثمّ الاسم — وفشلها لا يُسقط النسخة الأولى بل يُقال.
+   التنظيف بالقواعد نفسها في المجلّدين. والاسترجاع يقرأ من الثاني إن تعذّر الأوّل. */
+function bkMirror() { const m = CFG.backup && CFG.backup.mirror; return (typeof m === 'string' && PATH_OK.test(m) && path.resolve(m) !== path.resolve(bkDir() || '.')) ? m : ''; }
 function bkSave(patch) {
   CFG.backup = Object.assign({}, CFG.backup || {}, patch);
   const f = path.join(app.getPath('userData'), 'config.json');
@@ -1251,8 +1255,8 @@ function bkSave(patch) {
   cur.backup = CFG.backup;
   try { fs.writeFileSync(f, JSON.stringify(cur, null, 2)); } catch (e) {}
 }
-async function bkList() {
-  const dir = bkDir(); if (!dir) return [];
+async function bkList(d) {
+  const dir = d === undefined ? bkDir() : d; if (!dir) return [];
   let names = [];
   try { names = await within(fs.promises.readdir(dir), 8000); } catch (e) { return []; }
   const out = [];
@@ -1275,7 +1279,40 @@ ipcMain.handle('tf-backup-pick', async (ev) => {
     return { ok: true, dir: v };
   } catch (e) { return { ok: false, error: 'failed' }; }
 });
-ipcMain.handle('tf-backup-state', async (ev) => fromApp(ev) ? { ok: true, dir: bkDir(), auto: !(CFG.backup && CFG.backup.auto === false), files: await bkList() } : { ok: false, error: 'origin' });
+ipcMain.handle('tf-backup-state', async (ev) => {
+  if (!fromApp(ev)) return { ok: false, error: 'origin' };
+  const mir = bkMirror(), B = CFG.backup || {};
+  return { ok: true, dir: bkDir(), auto: !(B.auto === false), files: await bkList(),
+    mirror: mir, mirrorFiles: mir ? (await bkList(mir)).length : 0, mirrorLast: mir ? (B.mirrorLast || 0) : 0, mirrorErr: mir ? String(B.mirrorErr || '') : '' };
+});
+/* 1.9.17 — اختيار المجلّد الثاني أو إلغاؤه: يُختبر بملفٍّ يُكتب ويُحذف، ولا يكون المجلّد الأوّل نفسه */
+ipcMain.handle('tf-backup-mirror', async (ev, op) => {
+  if (!fromApp(ev)) return { ok: false, error: 'origin' };
+  if (op === 'clear') { bkSave({ mirror: '', mirrorErr: '', mirrorLast: 0 }); return { ok: true, mirror: '' }; }
+  if (!bkDir()) return { ok: false, error: 'no_dir' };
+  try {
+    const r = await dialog.showOpenDialog(win && !win.isDestroyed() ? win : undefined, { title: 'المجلّد الثاني للنسخ الاحتياطيّ', properties: ['openDirectory', 'createDirectory'], defaultPath: bkMirror() || undefined });
+    if (!r || r.canceled || !r.filePaths || !r.filePaths[0]) return { ok: false, error: 'canceled' };
+    const v = r.filePaths[0];
+    if (!PATH_OK.test(v)) return { ok: false, error: 'bad_path' };
+    if (path.resolve(v) === path.resolve(bkDir())) return { ok: false, error: 'same_dir' };
+    const probe = PX(v).join(v, '.tf-probe-' + crypto.randomBytes(4).toString('hex') + '.tmp');
+    try { await within(fs.promises.writeFile(probe, 'ok'), 8000); await within(fs.promises.unlink(probe), 8000); } catch (e) { return { ok: false, error: errOf(e) }; }
+    bkSave({ mirror: v, mirrorErr: '' });
+    return { ok: true, mirror: v };
+  } catch (e) { return { ok: false, error: 'failed' }; }
+});
+/* الكتابة الآمنة في مجلّد: مؤقّتاً ثمّ قراءةٌ ومطابقة البصمة ثمّ الاسم */
+async function bkPut(dir, name, buf, sha) {
+  const dest = PX(dir).join(dir, name), tmp = dest + '.tfpart';
+  try {
+    await within(fs.promises.writeFile(tmp, buf), 120000);
+    const back = await within(fs.promises.readFile(tmp), 120000);
+    if (crypto.createHash('sha256').update(back).digest('hex') !== sha) { try { await fs.promises.unlink(tmp); } catch (x) {} return { ok: false, error: 'verify_failed' }; }
+    await within(fs.promises.rename(tmp, dest), 8000);
+    return { ok: true, out: dest, size: back.length };
+  } catch (e) { try { await fs.promises.unlink(tmp); } catch (x) {} return { ok: false, error: errOf(e) }; }
+}
 ipcMain.handle('tf-backup-auto', (ev, on) => { if (!fromApp(ev)) return { ok: false, error: 'origin' }; bkSave({ auto: on !== false }); return { ok: true, auto: on !== false }; });
 ipcMain.handle('tf-backup-write', async (ev, o) => {
   if (!fromApp(ev)) return { ok: false, error: 'origin' };
@@ -1294,20 +1331,31 @@ ipcMain.handle('tf-backup-write', async (ev, o) => {
     if (got !== sha) { try { await fs.promises.unlink(tmp); } catch (x) {} return { ok: false, error: 'verify_failed' }; }
     await within(fs.promises.rename(tmp, dest), 8000);
     bkSave({ last: Date.now(), lastName: name });
-    return { ok: true, out: dest, size: back.length };
+    /* 1.9.17 — والنسخة الثانية: فشلها يُقال ولا يُسقط الأولى */
+    const mir = bkMirror(); let mirror = null;
+    if (mir) { mirror = await bkPut(mir, name, back, sha); bkSave(mirror.ok ? { mirrorLast: Date.now(), mirrorErr: '' } : { mirrorErr: mirror.error || 'failed' }); }
+    return { ok: true, out: dest, size: back.length, mirror };
   } catch (e) { try { await fs.promises.unlink(tmp); } catch (x) {} return { ok: false, error: errOf(e) }; }
 });
 ipcMain.handle('tf-backup-read', async (ev, name) => {
   if (!fromApp(ev)) return { ok: false, error: 'origin' };
-  const dir = bkDir(); name = String(name || '');
+  const dir = bkDir(), mir = bkMirror(); name = String(name || '');
   if (!dir || !BK_RE.test(name)) return { ok: false, error: 'bad_name' };
   try { const b = await within(fs.promises.readFile(PX(dir).join(dir, name)), 120000); return { ok: true, bytes: new Uint8Array(b) }; }
-  catch (e) { return { ok: false, error: errOf(e) }; }
+  catch (e) {
+    if (mir) { try { const b = await within(fs.promises.readFile(PX(mir).join(mir, name)), 120000); return { ok: true, bytes: new Uint8Array(b), from: 'mirror' }; } catch (x) {} }   /* 1.9.17 — من الثانية إن تعذّرت الأولى */
+    return { ok: false, error: errOf(e) };
+  }
 });
 ipcMain.handle('tf-backup-prune', async (ev) => {
   if (!fromApp(ev)) return { ok: false, error: 'origin' };
   const dir = bkDir(); if (!dir) return { ok: false, error: 'no_dir' };
-  const files = await bkList(), now = Date.now(), keep = new Set(), days = new Set(), weeks = new Set();
+  const a = await bkPrune(dir), mir = bkMirror();
+  const b = mir ? await bkPrune(mir) : null;   /* 1.9.17 — والمجلّد الثاني بالقواعد نفسها */
+  return { ok: true, removed: a.removed, kept: a.kept, mirror: b };
+});
+async function bkPrune(dir) {
+  const files = await bkList(dir), now = Date.now(), keep = new Set(), days = new Set(), weeks = new Set();
   for (const f of files) {   /* الأحدث أوّلاً */
     const m = BK_RE.exec(f.name); if (!m) continue;
     const d = Date.UTC(+m[1], +m[2] - 1, +m[3]), age = (now - d) / 864e5;
@@ -1319,8 +1367,8 @@ ipcMain.handle('tf-backup-prune', async (ev) => {
   if (files[0]) keep.add(files[0].name);   /* الأحدث يبقى دائماً */
   let n = 0;
   for (const f of files) if (!keep.has(f.name)) { try { await within(fs.promises.unlink(PX(dir).join(dir, f.name)), 8000); n++; } catch (e) {} }
-  return { ok: true, removed: n, kept: keep.size };
-});
+  return { removed: n, kept: keep.size };
+}
 ipcMain.handle('tf-agent-write', async (ev, o) => {
   if (!fromApp(ev)) return { ok: false, error: 'origin' };
   const c = AGENT.cfg; o = o || {};
@@ -1409,7 +1457,7 @@ ipcMain.handle('tf-agent-scan', async (ev) => {
   return { ok: true, day, on: AGENT.on, files };
 });
 ipcMain.handle('tf-desk-caps', (ev) => fromApp(ev)
-  ? { v: '1.9.16', pin: true, comfyNet: true, comfyInfo: true, asrModels: true, ctx: true, llm: true, vision: true, comfy: true, asr: asrReady(), sys: true, agentTest: true, oldDir: true, dayStart: true, llmImport: true, llmCpu: true, oldClean: true, inews: true, popLock: true, pinSet: true, splash: SPLASH_ON, boot: true, splashPhotos: true, splashLogin: true, auto: !!MEDIA.root && PATH_OK.test(MEDIA.root), avid: !!MEDIA.avidWatch && PATH_OK.test(MEDIA.avidWatch), paths: !!CFG.openPaths, version: app.getVersion(), updates: UPD.configured, agent: !CFG.agentPaused, agentOn: AGENT.on, devtools: DEVTOOLS, safePaths: true, screen: SCREEN, pullPause: true, cred: credCan(), gallery: true, dragOut: true }
+  ? { v: '1.9.17', pin: true, comfyNet: true, comfyInfo: true, asrModels: true, ctx: true, llm: true, vision: true, comfy: true, asr: asrReady(), sys: true, agentTest: true, oldDir: true, dayStart: true, llmImport: true, llmCpu: true, oldClean: true, inews: true, popLock: true, pinSet: true, splash: SPLASH_ON, boot: true, splashPhotos: true, splashLogin: true, auto: !!MEDIA.root && PATH_OK.test(MEDIA.root), avid: !!MEDIA.avidWatch && PATH_OK.test(MEDIA.avidWatch), paths: !!CFG.openPaths, version: app.getVersion(), updates: UPD.configured, agent: !CFG.agentPaused, agentOn: AGENT.on, bkMirror: true, devtools: DEVTOOLS, safePaths: true, screen: SCREEN, pullPause: true, cred: credCan(), gallery: true, dragOut: true }
   : {});
 /* 1.9.1 (v715) — «أعد التسمية» من تقرير الاستلام: في المجلّد نفسه وحده داخل جذر المصدر · اسمٌ آمن بلا مسار ولا امتدادٍ آخر ·
    لا يكتب فوق ملفٍّ موجود. الوكيل يرى الاسم الجديد في دورته التالية فيستلمه بقاعدته. */
