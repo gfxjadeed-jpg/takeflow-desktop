@@ -535,7 +535,7 @@ function updState() { return { state: UPD.state, version: UPD.version, percent: 
    فمن يصل إلى إعدادات المحطّة (أو إلى صفحتها بثغرة) يدفع مثبّتاً من حسابه إلى كلّ أجهزة الغرفة، وelectron-updater
    يتحقّق من بصمة latest.yml القادم من المصدر نفسه. الآن: مستودع TakeFlow وحده، وتخزين مشروع المحطة المعروف وحده
    (مجلّد desktop-releases) — ومن يريد غيرهما يكتبه صاحب الجهاز في config.json (updates.allowRepos · updates.allowHosts). */
-const UPD_REPOS = ['gfxjadeed-jpg/takeflow-desktop'];
+const UPD_REPOS = ['gfxjadeed-jpg/takeflow-desktop', 'takeflowtv/takeflow-desktop'];   /* 1.9.19 (v1371) — المستودع ينتقل إلى المؤسّسة takeflowtv: يُقبل المكانان فلا تتوقّف المحطّات أثناء النقل */
 const UPD_SB = ['iktjfdwqatlamqmqvefq.supabase.co'];
 function feedOk(u) {
   let x; try { x = new URL(String(u || '')); } catch (e) { return false; }
@@ -1457,7 +1457,7 @@ ipcMain.handle('tf-agent-scan', async (ev) => {
   return { ok: true, day, on: AGENT.on, files };
 });
 ipcMain.handle('tf-desk-caps', (ev) => fromApp(ev)
-  ? { v: '1.9.18', pin: true, comfyNet: true, comfyInfo: true, asrModels: true, ctx: true, llm: true, vision: true, comfy: true, asr: asrReady(), sys: true, agentTest: true, oldDir: true, dayStart: true, llmImport: true, llmCpu: true, oldClean: true, inews: true, popLock: true, pinSet: true, splash: SPLASH_ON, boot: true, splashPhotos: true, splashLogin: true, auto: !!MEDIA.root && PATH_OK.test(MEDIA.root), avid: !!MEDIA.avidWatch && PATH_OK.test(MEDIA.avidWatch), paths: !!CFG.openPaths, version: app.getVersion(), updates: UPD.configured, agent: !CFG.agentPaused, agentOn: AGENT.on, bkMirror: true, devtools: DEVTOOLS, safePaths: true, screen: SCREEN, pullPause: true, cred: credCan(), gallery: true, dragOut: true }
+  ? { v: '1.9.19', pin: true, comfyNet: true, comfyInfo: true, asrModels: true, ctx: true, llm: true, vision: true, comfy: true, asr: asrReady(), sys: true, agentTest: true, oldDir: true, dayStart: true, llmImport: true, llmCpu: true, oldClean: true, inews: true, popLock: true, pinSet: true, splash: SPLASH_ON, boot: true, splashPhotos: true, splashLogin: true, auto: !!MEDIA.root && PATH_OK.test(MEDIA.root), avid: !!MEDIA.avidWatch && PATH_OK.test(MEDIA.avidWatch), paths: !!CFG.openPaths, version: app.getVersion(), updates: UPD.configured, agent: !CFG.agentPaused, agentOn: AGENT.on, bkMirror: true, devtools: DEVTOOLS, safePaths: true, screen: SCREEN, pullPause: true, cred: credCan(), gallery: true, dragOut: true }
   : {});
 /* 1.9.1 (v715) — «أعد التسمية» من تقرير الاستلام: في المجلّد نفسه وحده داخل جذر المصدر · اسمٌ آمن بلا مسار ولا امتدادٍ آخر ·
    لا يكتب فوق ملفٍّ موجود. الوكيل يرى الاسم الجديد في دورته التالية فيستلمه بقاعدته. */
